@@ -1,0 +1,910 @@
+// We'll store the Chart.js instance & chart-specific data arrays
+window.mainChart = null;
+window.chartDatasets = [];
+
+// Cap rendered points so large captures stay responsive.
+const MAX_LINE_SCATTER_POINTS = 4500;
+const MAX_DISTRIBUTION_POINTS = 6000;
+const MAX_QQ_POINTS = 3000;
+
+/**
+ * Largest-Triangle-Three-Buckets downsampling — preserves visual shape of line data.
+ * @param {{x:number,y:number}[]} points
+ * @param {number} threshold
+ */
+function decimateLTTB(points, threshold) {
+  const len = points.length;
+  if (len <= threshold || threshold < 3) return points;
+
+  const sampled = new Array(threshold);
+  let sampledIndex = 0;
+  sampled[sampledIndex++] = points[0];
+
+  const bucketSize = (len - 2) / (threshold - 2);
+  let a = 0;
+
+  for (let i = 0; i < threshold - 2; i++) {
+    const rangeStart = Math.floor((i + 1) * bucketSize) + 1;
+    const rangeEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, len);
+
+    let avgX = 0;
+    let avgY = 0;
+    const avgStart = Math.floor(i * bucketSize) + 1;
+    const avgEnd = Math.min(Math.floor((i + 1) * bucketSize) + 1, len);
+    const avgCount = avgEnd - avgStart;
+    for (let j = avgStart; j < avgEnd; j++) {
+      avgX += points[j].x;
+      avgY += points[j].y;
+    }
+    avgX /= avgCount;
+    avgY /= avgCount;
+
+    let maxArea = -1;
+    let nextA = rangeStart;
+    const pointA = points[a];
+
+    for (let j = rangeStart; j < rangeEnd; j++) {
+      const pointJ = points[j];
+      const area = Math.abs(
+        (pointA.x - avgX) * (pointJ.y - pointA.y) -
+        (pointA.x - pointJ.x) * (avgY - pointA.y)
+      );
+      if (area > maxArea) {
+        maxArea = area;
+        nextA = j;
+      }
+    }
+
+    sampled[sampledIndex++] = points[nextA];
+    a = nextA;
+  }
+
+  sampled[sampledIndex++] = points[len - 1];
+  return sampled;
+}
+
+/** Detect timestamp column once per dataset instead of scanning every row. */
+function getDatasetTimestampKey(dataset) {
+  if (dataset._timestampKey !== undefined) return dataset._timestampKey;
+
+  const sample = dataset.rows?.[0];
+  if (!sample) {
+    dataset._timestampKey = null;
+    return null;
+  }
+
+  for (const key of Object.keys(sample)) {
+    const lk = key.toLowerCase();
+    if (
+      lk === 'timestamp' ||
+      lk.includes('elapsed time') ||
+      lk.includes('timestamp (elapsed time in seconds)') ||
+      (lk.startsWith('time') && lk.includes('seconds'))
+    ) {
+      dataset._timestampKey = key;
+      return key;
+    }
+  }
+
+  dataset._timestampKey = null;
+  return null;
+}
+
+/** Cached numeric series for a metric — avoids re-reading every row on each add. */
+function getMetricSeries(dataset, metric) {
+  if (!dataset._seriesCache) dataset._seriesCache = Object.create(null);
+  if (dataset._seriesCache[metric]) return dataset._seriesCache[metric];
+
+  const rows = dataset.rows || [];
+  const values = [];
+  for (let i = 0; i < rows.length; i++) {
+    const v = getMetricValue(rows[i], metric);
+    if (Number.isFinite(v)) values.push(v);
+  }
+  dataset._seriesCache[metric] = values;
+  return values;
+}
+
+function sampleSeries(values, maxPoints) {
+  if (values.length <= maxPoints) return values;
+  const out = new Array(maxPoints);
+  const step = values.length / maxPoints;
+  for (let i = 0; i < maxPoints; i++) {
+    out[i] = values[Math.floor(i * step)];
+  }
+  return out;
+}
+
+/**
+ * Builds (and caches) line/scatter points with optional LTTB decimation.
+ */
+function getLineScatterPoints(dataset, metric, useValueX) {
+  if (!dataset._pointCache) dataset._pointCache = Object.create(null);
+  const cacheKey = `${metric}:${useValueX ? 1 : 0}`;
+  if (dataset._pointCache[cacheKey]) return dataset._pointCache[cacheKey];
+
+  const rows = dataset.rows || [];
+  const timestampKey = useValueX ? getDatasetTimestampKey(dataset) : null;
+  const points = [];
+  let frameIndex = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const value = getMetricValue(rows[i], metric);
+    if (!Number.isFinite(value)) continue;
+
+    frameIndex++;
+    let xValue = frameIndex;
+    if (useValueX && timestampKey) {
+      const ts = parseFloat(rows[i][timestampKey]);
+      if (Number.isFinite(ts)) xValue = ts;
+    }
+
+    points.push({ x: xValue, y: value });
+  }
+
+  const totalPoints = points.length;
+  const displayPoints = totalPoints > MAX_LINE_SCATTER_POINTS
+    ? decimateLTTB(points, MAX_LINE_SCATTER_POINTS)
+    : points;
+
+  const result = { points: displayPoints, totalPoints, displayedPoints: displayPoints.length };
+  dataset._pointCache[cacheKey] = result;
+  return result;
+}
+
+function buildLineScatterPoints(rows, metric, useValueX) {
+  // Legacy entry point — prefer getLineScatterPoints when dataset object is available.
+  const dataset = { rows, _pointCache: null, _timestampKey: undefined };
+  return getLineScatterPoints(dataset, metric, useValueX).points;
+}
+
+/**
+ * Builds a histogram from an array of numeric data.
+ * @param {number[]} data
+ * @returns {{labels: string[], counts: number[]}}
+ */
+function buildHistogram(data) {
+  if (!data.length) {
+    return { labels: [], counts: [] };
+  }
+
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+  for (let i = 0; i < data.length; i++) {
+    const v = data[i];
+    if (v < minVal) minVal = v;
+    if (v > maxVal) maxVal = v;
+  }
+
+  // Handle case where all values are identical
+  if (minVal === maxVal) {
+    return { labels: [minVal.toString()], counts: [data.length] };
+  }
+
+  const binCount = Math.max(1, Math.min(50, Math.ceil(Math.sqrt(data.length))));
+  const binWidth = (maxVal - minVal) / binCount;
+  const counts = Array(binCount).fill(0);
+
+  for (let i = 0; i < data.length; i++) {
+    const val = data[i];
+    const idx = Math.min(binCount - 1, Math.floor((val - minVal) / binWidth));
+    counts[idx]++;
+  }
+
+  const labels = [];
+  for (let i = 0; i < binCount; i++) {
+    const rangeStart = (minVal + i * binWidth).toFixed(2);
+    const rangeEnd = (minVal + (i + 1) * binWidth).toFixed(2);
+    labels.push(`${rangeStart}-${rangeEnd}`);
+  }
+  return { labels, counts };
+}
+
+/**
+ * Rebuilds X/Y points for existing line/scatter datasets when Time-based X toggles.
+ * Uses source metadata captured when datasets are added to the chart.
+ */
+function rebuildCurrentLineScatterDatasets() {
+  if (!Array.isArray(window.chartDatasets) || !window.chartDatasets.length) return;
+  if (window.currentChartType !== 'line' && window.currentChartType !== 'scatter') return;
+
+  const useValueX = document.getElementById('useValueX')?.checked;
+
+  window.chartDatasets = window.chartDatasets.map(datasetCfg => {
+    const sourceDatasetIndex = datasetCfg.sourceDatasetIndex;
+    const sourceMetric = datasetCfg.sourceMetric;
+
+    if (!Number.isInteger(sourceDatasetIndex) || typeof sourceMetric !== 'string') {
+      return datasetCfg;
+    }
+
+    const sourceDataset = window.allDatasets?.[sourceDatasetIndex];
+    if (!sourceDataset?.rows?.length) return datasetCfg;
+
+    if (sourceDataset._pointCache) sourceDataset._pointCache = Object.create(null);
+    const { points, totalPoints, displayedPoints } = getLineScatterPoints(
+      sourceDataset, sourceMetric, useValueX
+    );
+    if (!points.length) return datasetCfg;
+
+    return {
+      ...datasetCfg,
+      data: points,
+      totalPoints,
+      displayedPoints
+    };
+  });
+}
+
+/**
+ * Builds Q-Q plot data points, comparing sample quantiles vs. theoretical normal quantiles.
+ * @param {number[]} data
+ * @returns {{x: number, y: number}[]}
+ */
+function buildQQPlot(data) {
+  const sorted = (data.length > MAX_QQ_POINTS
+    ? sampleSeries(data, MAX_QQ_POINTS)
+    : data.slice()
+  ).sort((a, b) => a - b);
+
+  const n = sorted.length;
+  const qqPoints = new Array(n);
+
+  for (let i = 0; i < n; i++) {
+    const p = (i + 0.5) / n;
+    const z = jStat.normal.inv(p, 0, 1);
+    qqPoints[i] = { x: z, y: sorted[i] };
+  }
+  return qqPoints;
+}
+
+function getControllerType(chartType) {
+  if (chartType === 'histogram') return 'bar';
+  if (chartType === 'qqplot' || chartType === 'scatter') return 'scatter';
+  if (chartType === 'violin') return 'violin';
+  if (chartType === 'boxplot') return 'boxplot';
+  return 'line';
+}
+
+function buildChartScales(chartType) {
+  const scales = {};
+  const useValueX = document.getElementById('useValueX')?.checked;
+  const xTitleSample = useValueX ? 'Time (s)' : 'Sample # / Frame #';
+
+  if (chartType === 'histogram') {
+    scales.x = { type: 'category', title: { display: true, text: 'Bin Range' } };
+    scales.y = { title: { display: true, text: 'Count' } };
+  } else if (chartType === 'qqplot') {
+    scales.x = { type: 'linear', title: { display: true, text: 'Theoretical Quantiles' } };
+    scales.y = { type: 'linear', title: { display: true, text: 'Sample Quantiles' } };
+  } else if (chartType === 'scatter') {
+    scales.x = { type: 'linear', title: { display: true, text: xTitleSample } };
+    scales.y = { type: 'linear', title: { display: true, text: 'Value' } };
+  } else if (chartType === 'violin' || chartType === 'boxplot') {
+    scales.x = { type: 'category', title: { display: true, text: 'Dataset' } };
+    scales.y = { type: 'linear', title: { display: true, text: 'Value' }, beginAtZero: false, grace: '10%' };
+  } else {
+    scales.x = { type: 'linear', title: { display: true, text: xTitleSample } };
+    scales.y = { type: 'linear', title: { display: true, text: 'Value' } };
+  }
+  return scales;
+}
+
+/**
+ * Renders (or updates) the Chart.js chart based on the current chartDatasets array.
+ * @param {string} chartType
+ * @param {{ incremental?: boolean }} [opts]
+ */
+function renderChart(chartType, opts = {}) {
+  const canvas = document.getElementById('mainChart');
+  const chartContainer = document.getElementById('chartContainer');
+  if (!canvas || !chartContainer) {
+    console.warn("Chart elements not found in HTML.");
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  const incremental = Boolean(opts.incremental);
+  const canIncremental = incremental &&
+    window.mainChart &&
+    window.currentChartType === chartType &&
+    chartType !== 'violin' &&
+    chartType !== 'boxplot';
+
+  if (!Array.isArray(window.chartDatasets) || window.chartDatasets.length === 0) {
+    if (window.mainChart) {
+      window.mainChart.destroy();
+      window.mainChart = null;
+    }
+    chartContainer.classList.add('empty');
+    return;
+  }
+  chartContainer.classList.remove('empty');
+
+  if (canIncremental) {
+    window.mainChart.data.datasets = window.chartDatasets.slice();
+    if (chartType === 'violin' || chartType === 'boxplot') {
+      window.mainChart.data.labels = window.chartLabels.slice();
+    }
+    window.mainChart.options.scales = buildChartScales(chartType);
+    window.mainChart.update('none');
+    return;
+  }
+
+  if (window.mainChart) {
+    window.mainChart.destroy();
+  }
+
+  const ctrlType = getControllerType(chartType);
+  const scales = buildChartScales(chartType);
+
+  const cfg = {
+    type: ctrlType,
+    data: {
+      datasets: window.chartDatasets.slice()
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales,
+      plugins: {
+        decimation: (chartType === 'line') ? {
+          enabled: true,
+          algorithm: 'lttb',
+          samples: 2000
+        } : false,
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              if (ctx.dataset.type === 'violin') {
+                const vals = ctx.dataset.data[ctx.dataIndex];
+                const [q1, m, q3] = jStat.quantiles(vals, [0.25, 0.5, 0.75]);
+                return [
+                  `N = ${vals.length}`,
+                  `Q1 = ${q1.toFixed(2)}`,
+                  `Median = ${m.toFixed(2)}`,
+                  `Q3 = ${q3.toFixed(2)}`
+                ];
+              }
+              const ds = ctx.dataset;
+              if (ds.totalPoints && ds.displayedPoints && ds.totalPoints > ds.displayedPoints) {
+                return `${ds.label}: ${ctx.formattedValue} (${ds.displayedPoints.toLocaleString()} of ${ds.totalPoints.toLocaleString()} frames)`;
+              }
+              return `${ctx.dataset.label}: ${ctx.formattedValue}`;
+            }
+          }
+        },
+        legend: { display: true },
+        zoom: {
+          pan:  { enabled: true, mode: 'xy' },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(52,152,219,0.2)',
+              borderColor:     'rgba(52,152,219,0.5)',
+              borderWidth:     1
+            },
+            mode: 'xy'
+          }
+        }
+      }
+    }
+  };
+
+  if (chartType === 'violin' || chartType === 'boxplot') {
+    cfg.data.labels = window.chartLabels.slice();
+
+    let minValue = Infinity;
+    let maxValue = -Infinity;
+    window.chartDatasets.forEach(dataset => {
+      (dataset.data || []).forEach(group => {
+        if (!Array.isArray(group)) return;
+        for (let i = 0; i < group.length; i++) {
+          const value = group[i];
+          if (Number.isFinite(value)) {
+            if (value < minValue) minValue = value;
+            if (value > maxValue) maxValue = value;
+          }
+        }
+      });
+    });
+
+    if (Number.isFinite(minValue) && Number.isFinite(maxValue)) {
+      const span = maxValue - minValue;
+      const padding = span > 0 ? span * 0.1 : Math.max(1, Math.abs(minValue) * 0.1, Math.abs(maxValue) * 0.1);
+      cfg.options.scales.y.min = minValue - padding;
+      cfg.options.scales.y.max = maxValue + padding;
+    }
+  }
+
+  window.mainChart = new Chart(ctx, cfg);
+}
+
+
+/**
+ * Clears the current chart (removes all datasets from chartDatasets).
+ */
+function clearChart() {
+  window.currentChartType = null;
+  window.chartLabels = [];
+  window.chartDatasets.length = 0;
+  if (window.mainChart) {
+    window.mainChart.destroy();
+    window.mainChart = null;
+  }
+  
+  // Show the empty state
+  const chartContainer = document.getElementById('chartContainer');
+  if (chartContainer) {
+    chartContainer.classList.add('empty');
+  }
+
+  const datasetOrderList = document.getElementById('datasetOrderList');
+  if (datasetOrderList) {
+    datasetOrderList.innerHTML = '';
+  }
+
+  const clearChartBtn = document.getElementById('clearChartBtn');
+  if (clearChartBtn) {
+    clearChartBtn.disabled = true;
+  }
+
+  console.log("Chart cleared");
+}
+
+// helper to convert "#RRGGBB" → "rgba(r,g,b,a)"
+function hexToRgba(hex, alpha) {
+  const bigint = parseInt(hex.replace('#',''), 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8)  & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function setChartBusy(busy) {
+  const btn = document.getElementById('addToChartBtn');
+  const container = document.getElementById('chartContainer');
+  if (btn) {
+    btn.disabled = busy;
+    btn.textContent = busy ? 'Adding…' : 'Add to chart';
+  }
+  container?.classList.toggle('chart-busy', busy);
+}
+
+/**
+ * Builds chartDatasets (and for violin, chartLabels) then calls renderChart().
+ */
+function addToChartCore() {
+  const select = document.getElementById('datasetSelect');
+  if (!select) return;
+
+  const indices = Array.from(select.selectedOptions).map(o => +o.value);
+  if (indices.length === 0) {
+    window.notify?.('Select at least one dataset before adding to chart.', 'warning');
+    return;
+  }
+
+  const metric    = document.getElementById('metricSelect').value;
+  const chartType = document.getElementById('chartTypeSelect').value;
+  const hexColor  = document.getElementById('colorSelect').value;
+
+  if (metric === 'Stepwise_Relative_SD') {
+    window.notify?.('Stepwise Relative SD is an aggregate metric — use the Statistics tab instead of charting.', 'info');
+    return;
+  }
+
+  const hadExistingChart = window.chartDatasets.length > 0 && window.mainChart;
+
+  if (!window.chartDatasets.length) {
+    window.currentChartType = chartType;
+  }
+
+  if (window.chartDatasets.length && chartType !== window.currentChartType) {
+    window.notify?.(
+      `You already started a "${window.currentChartType}" chart. Clear it first to switch to "${chartType}".`,
+      'warning'
+    );
+    return;
+  }
+
+  // ---- VIOLIN + BOXPLOT COMBO ----
+  if (chartType === 'violin') {
+    const labels = indices.map(i => window.allDatasets[i].name);
+    const groups = indices.map(i =>
+      sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
+    );
+
+    window.chartLabels = labels.slice();
+
+    const violinFill = hexToRgba(hexColor, 0.3);
+    const borderClr  = hexToRgba(hexColor, 1.0);
+    const grayBorder = 'rgba(80,80,80,1)';
+    const grayFill   = 'rgba(80,80,80,0.4)';
+
+    window.chartDatasets = [{
+      label: `${metric} Density`,
+      type: 'violin',
+      data: groups,
+      backgroundColor: labels.map(() => violinFill),
+      borderColor: labels.map(() => borderClr),
+      borderWidth: 1,
+      order: 2
+    }, {
+      label: `${metric} Quartiles`,
+      type: 'boxplot',
+      data: groups,
+      backgroundColor: labels.map(() => grayFill),
+      borderColor: labels.map(() => grayBorder),
+      borderWidth: 2,
+      order: 1,
+      barPercentage: 0.05,
+      categoryPercentage: 1.0
+    }];
+
+    renderChart('violin');
+    updateDatasetOrder();
+    document.getElementById('clearChartBtn')?.removeAttribute('disabled');
+    return;
+  }
+
+  // ---- BOXPLOT ONLY ----
+  if (chartType === 'boxplot') {
+    const labels = indices.map(i => window.allDatasets[i].name);
+    const groups = indices.map(i =>
+      sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
+    );
+
+    window.chartLabels = labels.slice();
+    window.chartDatasets = [{
+      label: `${metric} Quartiles`,
+      type: 'boxplot',
+      data: groups,
+      backgroundColor: labels.map(() => hexToRgba(hexColor, 0.4)),
+      borderColor: labels.map(() => hexToRgba(hexColor, 1.0)),
+      borderWidth: 2
+    }];
+
+    renderChart('boxplot');
+    updateDatasetOrder();
+    document.getElementById('clearChartBtn')?.removeAttribute('disabled');
+    return;
+  }
+
+  // ---- ALL OTHER CHART TYPES ----
+  indices.forEach(idx => {
+    const ds = window.allDatasets[idx];
+    if (!ds?.rows?.length) return;
+
+    const vals = getMetricSeries(ds, metric);
+    if (!vals.length) return;
+
+    let cfg;
+
+    if (chartType === 'line' || chartType === 'scatter') {
+      const useValueX = document.getElementById('useValueX')?.checked;
+      const { points, totalPoints, displayedPoints } = getLineScatterPoints(ds, metric, useValueX);
+      if (!points.length) return;
+
+      cfg = {
+        label: `${ds.name} - ${metric}`,
+        data: points,
+        totalPoints,
+        displayedPoints,
+        borderColor: hexColor,
+        backgroundColor: hexColor,
+        pointRadius: chartType === 'scatter' ? 2 : 0,
+        pointHitRadius: chartType === 'line' ? 4 : 2,
+        showLine: chartType === 'line',
+        fill: false,
+        parsing: false,
+        sourceDatasetIndex: idx,
+        sourceMetric: metric
+      };
+    } else if (chartType === 'histogram') {
+      const bins = buildHistogram(vals);
+      cfg = {
+        label: `${ds.name} - ${metric}`,
+        data: bins.counts.map((c, i) => ({ x: bins.labels[i], y: c })),
+        type: 'bar',
+        backgroundColor: hexColor
+      };
+    } else if (chartType === 'qqplot') {
+      const qq = buildQQPlot(vals);
+      const mean = jStat.mean(vals);
+      const std = jStat.stdev(vals);
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (let i = 0; i < qq.length; i++) {
+        const z = qq[i].x;
+        if (z < minZ) minZ = z;
+        if (z > maxZ) maxZ = z;
+      }
+      const linePts = [
+        { x: minZ, y: mean + std * minZ },
+        { x: maxZ, y: mean + std * maxZ }
+      ];
+
+      window.chartDatasets.push({
+        label: `${ds.name} - ${metric} (Data)`,
+        data: qq,
+        borderColor: hexColor,
+        backgroundColor: hexColor,
+        pointRadius: 2,
+        showLine: false
+      });
+
+      cfg = {
+        label: `${ds.name} - ${metric} (Ref Line)`,
+        data: linePts,
+        borderColor: '#f00',
+        backgroundColor: '#f00',
+        pointRadius: 0,
+        borderWidth: 2,
+        showLine: true
+      };
+    }
+
+    if (cfg) window.chartDatasets.push(cfg);
+  });
+
+  renderChart(chartType, { incremental: hadExistingChart });
+  updateDatasetOrder();
+  document.getElementById('clearChartBtn')?.removeAttribute('disabled');
+}
+
+function addToChart() {
+  const btn = document.getElementById('addToChartBtn');
+  if (btn?.disabled) return;
+
+  setChartBusy(true);
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try {
+        addToChartCore();
+      } finally {
+        setChartBusy(false);
+      }
+    }, 0);
+  });
+}
+
+/**
+ * Move a dataset up/down in the chartDatasets array.
+ * Useful if you want to let the user reorder the stacked order in the chart.
+ * @param {number} index
+ * @param {"up"|"down"} direction
+ */
+function moveDataset(index, direction) {
+  if (direction === 'up' && index === 0) return;
+  if (direction === 'down' && index === window.chartDatasets.length - 1) return;
+
+  const newIndex = direction === 'up' ? index - 1 : index + 1;
+  [window.chartDatasets[index], window.chartDatasets[newIndex]] =
+    [window.chartDatasets[newIndex], window.chartDatasets[index]];
+
+  updateDatasetOrder();
+  if (window.mainChart) {
+    window.mainChart.data.datasets = window.chartDatasets;
+    window.mainChart.update('none');
+  }
+}
+
+/**
+ * Removes a dataset from the chartDatasets array at the specified index
+ * @param {number} index - The index of the dataset to remove
+ */
+function removeDataset(index) {
+  if (index < 0 || index >= window.chartDatasets.length) return;
+  
+  // Remove the dataset at the specified index
+  window.chartDatasets.splice(index, 1);
+
+  // If all datasets are removed, fully reset chart state.
+  if (window.chartDatasets.length === 0) {
+    clearChart();
+    return;
+  }
+  
+  // Update the dataset order list
+  updateDatasetOrder();
+  
+  // Update the chart
+  if (window.mainChart) {
+    window.mainChart.data.datasets = window.chartDatasets;
+    window.mainChart.update('none');
+  }
+}
+
+/**
+ * Re‑build the UL that shows the stacking order.
+ * Called after every add / move / remove.
+ */
+function updateDatasetOrder () {
+  const orderList = document.getElementById('datasetOrderList');
+  if (!orderList) return;
+
+  const frag = document.createDocumentFragment();
+
+  window.chartDatasets.forEach((dataset, index) => {
+    const li = document.createElement('li');
+    li.className      = 'dataset-order-item';
+    li.dataset.index  = index;               // keep the index on the node
+
+    /* small colour blob */
+    const swatch = document.createElement('div');
+    swatch.className = 'dataset-color';
+    swatch.style.background =
+      Array.isArray(dataset.backgroundColor)
+        ? dataset.backgroundColor[0]
+        : dataset.backgroundColor || '#888';
+
+    /* label */
+    const name = document.createElement('span');
+    name.textContent = dataset.label;
+
+    /* up / down / remove controls */
+    const controls = document.createElement('div');
+    controls.className = 'dataset-order-controls';
+
+    const mkBtn = (txt, title, cb) => {
+      const b = document.createElement('button');
+      b.textContent = txt;
+      b.title       = title;
+      b.addEventListener('click', () => cb(index));
+      return b;
+    };
+
+    controls.append(
+      mkBtn('↑','Move up'  , i => moveDataset(i,'up'  )),
+      mkBtn('↓','Move down', i => moveDataset(i,'down')),
+      mkBtn('×','Remove'   , i => removeDataset(i)     )
+    );
+
+    li.append(swatch, name, controls);
+    frag.appendChild(li);
+  });
+
+  orderList.innerHTML = '';
+  orderList.appendChild(frag);
+}
+
+
+/**
+ * Displays raw data from a selected dataset
+ * @param {string|number} datasetId - ID of the dataset to display
+ */
+function displayRawData(datasetId) {
+  const rawDataElement = document.getElementById('rawData');
+  const rawDataInfo = document.querySelector('.raw-data-info');
+  
+  if (!rawDataElement) return;
+  
+  // Convert datasetId to a number if it's passed as a string
+  const datasetIndex = parseInt(datasetId, 10);
+  
+  if (isNaN(datasetIndex) || !window.allDatasets || datasetIndex >= window.allDatasets.length) {
+    rawDataElement.textContent = '';
+    if (rawDataInfo) rawDataInfo.textContent = 'Select a dataset to view its raw content.';
+    return;
+  }
+  
+  const dataset = window.allDatasets[datasetIndex];
+  
+  // Update info about the selected dataset
+  if (rawDataInfo) {
+    rawDataInfo.innerHTML = `
+      <strong>${dataset.name}</strong> - 
+      ${dataset.rows.length} rows
+    `;
+  }
+  
+  // Format the data for display
+  if (dataset.rows.length === 0) {
+    rawDataElement.textContent = 'No data available in this dataset.';
+    return;
+  }
+  
+  // Get all available column names from the first row
+  const columns = Object.keys(dataset.rows[0] || {});
+  
+  // Display the first page of data
+  displayRawDataPage(dataset, columns, 0);
+}
+
+// Current page for raw data pagination
+let currentPage = 0;
+const rowsPerPage = 100;
+
+/**
+ * Displays a specific page of raw data
+ * @param {Object} dataset - The dataset to display
+ * @param {Array} columns - Array of column names
+ * @param {number} page - Page number to display (0-based)
+ */
+function displayRawDataPage(dataset, columns, page = 0) {
+  const rawDataElement = document.getElementById('rawData');
+  if (!rawDataElement) return;
+  
+  // Update current page tracker
+  currentPage = page;
+  
+  // Calculate start and end indices
+  const startIdx = page * rowsPerPage;
+  const endIdx = Math.min(startIdx + rowsPerPage, dataset.rows.length);
+  
+  // Create a header row
+  let tableContent = columns.join('\t') + '\n';
+  tableContent += columns.map(() => '--------').join('\t') + '\n';
+  
+  // Add data rows for current page
+  for (let i = startIdx; i < endIdx; i++) {
+    const row = dataset.rows[i];
+    tableContent += columns.map(col => row[col] !== undefined ? row[col] : 'N/A').join('\t') + '\n';
+  }
+  
+  // Add pagination info
+  tableContent += `\n\nShowing rows ${startIdx+1} to ${endIdx} of ${dataset.rows.length}`;
+  
+  // Add pagination controls if dataset has more rows than one page
+  if (dataset.rows.length > rowsPerPage) {
+    tableContent += '\n\n';
+    if (page > 0) {
+      tableContent += '[Previous Page] ';
+    }
+    if (endIdx < dataset.rows.length) {
+      tableContent += '[Next Page]';
+    }
+    
+    // Add pagination explanation
+    tableContent += '\n(Use the Raw Data Pagination controls below)';
+    
+    // Create pagination buttons if they don't exist
+    let paginationControls = document.getElementById('rawDataPagination');
+    if (!paginationControls) {
+      paginationControls = document.createElement('div');
+      paginationControls.id = 'rawDataPagination';
+      paginationControls.className = 'pagination-controls';
+      rawDataElement.parentNode.insertBefore(paginationControls, rawDataElement.nextSibling);
+    }
+    
+    paginationControls.innerHTML = `
+      <button id="prevPageBtn" ${page <= 0 ? 'disabled' : ''}>Previous Page</button>
+      <span>Page ${page + 1}</span>
+      <button id="nextPageBtn" ${endIdx >= dataset.rows.length ? 'disabled' : ''}>Next Page</button>
+    `;
+    
+    // Add event listeners to pagination buttons
+    document.getElementById('prevPageBtn')?.addEventListener('click', () => {
+      if (page > 0) displayRawDataPage(dataset, columns, page - 1);
+    });
+    
+    document.getElementById('nextPageBtn')?.addEventListener('click', () => {
+      if (endIdx < dataset.rows.length) displayRawDataPage(dataset, columns, page + 1);
+    });
+  } else {
+    // Remove pagination controls if not needed
+    const paginationControls = document.getElementById('rawDataPagination');
+    if (paginationControls) {
+      paginationControls.remove();
+    }
+  }
+  
+  rawDataElement.textContent = tableContent;
+}
+
+// Export this function so it's available globally
+window.displayRawData = displayRawData;
+
+// Expose your chart functionality to the global scope
+window.buildHistogram = buildHistogram;
+window.buildQQPlot = buildQQPlot;
+window.renderChart = renderChart;
+window.rebuildCurrentLineScatterDatasets = rebuildCurrentLineScatterDatasets;
+window.clearChart = clearChart;
+window.addToChart = addToChart;
+window.moveDataset = moveDataset;
+window.updateDatasetOrder = updateDatasetOrder;
+window.removeDataset = removeDataset;
