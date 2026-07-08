@@ -440,9 +440,12 @@ function styleLinearAxis(config, title) {
 
 function getYAxisLabel(metric) {
   if (!metric) return 'Value';
-  if (metric === 'FrameTime' || metric.toLowerCase().includes('ms')) return 'ms';
-  if (metric.toLowerCase().includes('fps')) return 'FPS';
-  return getMetricDisplayName?.(metric) || metric;
+  if (metric === 'FPS' || metric === 'RenderedFPS' || metric === 'DisplayedFPS') return 'FPS';
+  if (metric === 'FrameTime' || /^Ms/i.test(metric)) return 'ms';
+  if (typeof window.getMetricChipLabel === 'function') return window.getMetricChipLabel(metric);
+  return typeof window.getMetricDisplayName === 'function'
+    ? window.getMetricDisplayName(metric)
+    : metric;
 }
 
 function buildZoomOptions() {
