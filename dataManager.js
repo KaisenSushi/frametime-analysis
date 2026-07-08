@@ -366,12 +366,21 @@ function removeDataset(index) {
 }
 
 function refreshDatasetLists() {
+  if (typeof window.assignDatasetColors === 'function') {
+    window.assignDatasetColors();
+  }
+
   // Show list in the "Uploaded Datasets" panel
   const ul = document.getElementById('datasetList');
   if (ul) {
     ul.innerHTML = '';
     window.allDatasets.forEach((ds, index) => {
       const li = document.createElement('li');
+
+      const stripe = document.createElement('span');
+      stripe.className = 'dataset-list-stripe';
+      stripe.style.backgroundColor = ds.color || '#888';
+      li.appendChild(stripe);
 
       const label = document.createElement('span');
       label.className = 'dataset-list-name';

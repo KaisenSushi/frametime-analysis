@@ -1,6 +1,41 @@
 // We'll store the Chart.js instance & chart-specific data arrays
 window.mainChart = null;
 window.chartDatasets = [];
+window.currentChartMetric = '';
+
+// Benchmark palette from BoringBoredom's Frame-Time-Analysis
+const BENCHMARK_COLORS = [
+  '#800000', '#008000', '#00bfff', '#ff8c00', '#ff00ff', '#deb887',
+  '#00ff00', '#0000ff', '#000080', '#2f4f4f', '#ffff54', '#dda0dd',
+  '#ff1493', '#7fffd4'
+];
+
+const CHART_TEXT = 'rgba(255,255,255,0.88)';
+const CHART_GRID = 'rgba(70,70,70,0.45)';
+const CHART_BORDER = 'rgba(70,70,70,0.8)';
+
+function getBenchmarkColor(index) {
+  return BENCHMARK_COLORS[index % BENCHMARK_COLORS.length];
+}
+
+function assignDatasetColors() {
+  (window.allDatasets || []).forEach((ds, index) => {
+    if (!ds.color) ds.color = getBenchmarkColor(index);
+  });
+}
+
+/** Frame-Time-Analysis style global Chart.js defaults */
+function initChartDefaults() {
+  if (!window.Chart?.defaults) return;
+  const d = Chart.defaults;
+  d.animation = false;
+  d.font.size = 13;
+  d.color = CHART_TEXT;
+  d.borderColor = CHART_BORDER;
+  d.normalized = true;
+}
+
+initChartDefaults();
 
 // Cap rendered points so large captures stay responsive.
 const MAX_LINE_SCATTER_POINTS = 4500;
@@ -260,32 +295,114 @@ function buildQQPlot(data) {
 
 function getControllerType(chartType) {
   if (chartType === 'histogram') return 'bar';
-  if (chartType === 'qqplot' || chartType === 'scatter') return 'scatter';
+  // FTA uses scatter + showLine for performant time-series lines
+  if (chartType === 'line' || chartType === 'qqplot' || chartType === 'scatter') return 'scatter';
   if (chartType === 'violin') return 'violin';
   if (chartType === 'boxplot') return 'boxplot';
-  return 'line';
+  return 'scatter';
+}
+
+function styleLinearAxis(config, title) {
+  return {
+    type: 'linear',
+    ...config,
+    title: { display: true, text: title, color: CHART_TEXT, font: { size: 13, weight: '600' } },
+    ticks: { color: CHART_TEXT, maxTicksLimit: 12 },
+    grid: { color: CHART_GRID },
+    border: { color: CHART_BORDER }
+  };
+}
+
+function getYAxisLabel(metric) {
+  if (!metric) return 'Value';
+  if (metric === 'FrameTime' || metric.toLowerCase().includes('ms')) return 'ms';
+  if (metric.toLowerCase().includes('fps')) return 'FPS';
+  return getMetricDisplayName?.(metric) || metric;
+}
+
+function buildZoomOptions() {
+  return {
+    pan: { enabled: true, mode: 'xy' },
+    zoom: {
+      wheel: { enabled: true, modifierKey: 'ctrl' },
+      drag: {
+        enabled: true,
+        modifierKey: 'ctrl',
+        backgroundColor: 'rgba(90,90,90,0.15)',
+        borderColor: 'rgba(255,255,255,0.35)',
+        borderWidth: 1
+      },
+      pinch: { enabled: true },
+      mode: 'xy'
+    },
+    limits: {
+      x: { min: 'original', max: 'original' },
+      y: { min: 'original', max: 'original' }
+    }
+  };
+}
+
+function computeSeriesExtents(datasets) {
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+
+  datasets.forEach(ds => {
+    (ds.data || []).forEach(point => {
+      if (!point || typeof point !== 'object') return;
+      if (Number.isFinite(point.x)) {
+        xMin = Math.min(xMin, point.x);
+        xMax = Math.max(xMax, point.x);
+      }
+      if (Number.isFinite(point.y)) {
+        yMin = Math.min(yMin, point.y);
+        yMax = Math.max(yMax, point.y);
+      }
+    });
+  });
+
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return null;
+
+  const ySpan = yMax - yMin;
+  const yPad = ySpan > 0 ? ySpan * 0.05 : Math.max(0.5, Math.abs(yMax) * 0.05);
+
+  return {
+    xMin: Number.isFinite(xMin) ? xMin : undefined,
+    xMax: Number.isFinite(xMax) ? xMax : undefined,
+    yMin: yMin - yPad,
+    yMax: yMax + yPad
+  };
 }
 
 function buildChartScales(chartType) {
   const scales = {};
   const useValueX = document.getElementById('useValueX')?.checked;
-  const xTitleSample = useValueX ? 'Time (s)' : 'Sample # / Frame #';
+  const xTitle = useValueX ? 'Duration (s)' : 'Frame #';
+  const yTitle = getYAxisLabel(window.currentChartMetric);
 
   if (chartType === 'histogram') {
-    scales.x = { type: 'category', title: { display: true, text: 'Bin Range' } };
-    scales.y = { title: { display: true, text: 'Count' } };
+    scales.x = { type: 'category', title: { display: true, text: 'Bin Range', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
+    scales.y = styleLinearAxis({}, 'Count');
   } else if (chartType === 'qqplot') {
-    scales.x = { type: 'linear', title: { display: true, text: 'Theoretical Quantiles' } };
-    scales.y = { type: 'linear', title: { display: true, text: 'Sample Quantiles' } };
-  } else if (chartType === 'scatter') {
-    scales.x = { type: 'linear', title: { display: true, text: xTitleSample } };
-    scales.y = { type: 'linear', title: { display: true, text: 'Value' } };
+    scales.x = styleLinearAxis({}, 'Theoretical Quantiles');
+    scales.y = styleLinearAxis({}, 'Sample Quantiles');
+  } else if (chartType === 'scatter' || chartType === 'line') {
+    scales.x = styleLinearAxis({ grid: { display: false } }, xTitle);
+    scales.y = styleLinearAxis({}, yTitle);
+    const extents = computeSeriesExtents(window.chartDatasets);
+    if (extents) {
+      if (extents.xMin !== undefined) scales.x.min = extents.xMin;
+      if (extents.xMax !== undefined) scales.x.max = extents.xMax;
+      scales.y.min = extents.yMin;
+      scales.y.max = extents.yMax;
+    }
   } else if (chartType === 'violin' || chartType === 'boxplot') {
-    scales.x = { type: 'category', title: { display: true, text: 'Dataset' } };
-    scales.y = { type: 'linear', title: { display: true, text: 'Value' }, beginAtZero: false, grace: '10%' };
+    scales.x = { type: 'category', title: { display: true, text: 'Dataset', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
+    scales.y = styleLinearAxis({ beginAtZero: false, grace: '10%' }, yTitle);
   } else {
-    scales.x = { type: 'linear', title: { display: true, text: xTitleSample } };
-    scales.y = { type: 'linear', title: { display: true, text: 'Value' } };
+    scales.x = styleLinearAxis({}, xTitle);
+    scales.y = styleLinearAxis({}, yTitle);
   }
   return scales;
 }
@@ -349,12 +466,17 @@ function renderChart(chartType, opts = {}) {
       animation: false,
       scales,
       plugins: {
-        decimation: (chartType === 'line') ? {
+        decimation: (chartType === 'line' || chartType === 'scatter') ? {
           enabled: true,
           algorithm: 'lttb',
           samples: 2000
         } : false,
         tooltip: {
+          backgroundColor: 'rgba(30,30,30,0.95)',
+          titleColor: CHART_TEXT,
+          bodyColor: CHART_TEXT,
+          borderColor: CHART_BORDER,
+          borderWidth: 1,
           callbacks: {
             label(ctx) {
               if (ctx.dataset.type === 'violin') {
@@ -375,21 +497,23 @@ function renderChart(chartType, opts = {}) {
             }
           }
         },
-        legend: { display: true },
-        zoom: {
-          pan:  { enabled: true, mode: 'xy' },
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            drag: {
-              enabled: true,
-              backgroundColor: 'rgba(52,152,219,0.2)',
-              borderColor:     'rgba(52,152,219,0.5)',
-              borderWidth:     1
-            },
-            mode: 'xy'
+        legend: {
+          display: true,
+          position: 'bottom',
+          align: 'start',
+          labels: {
+            color: CHART_TEXT,
+            boxWidth: 14,
+            padding: 12,
+            usePointStyle: true,
+            pointStyle: 'line'
           }
-        }
+        },
+        zoom: buildZoomOptions()
+      },
+      elements: {
+        line: { borderWidth: 2, tension: 0 },
+        point: { radius: 0, hitRadius: 4 }
       }
     }
   };
@@ -489,7 +613,11 @@ function addToChartCore() {
 
   const metric    = document.getElementById('metricSelect').value;
   const chartType = document.getElementById('chartTypeSelect').value;
-  const hexColor  = document.getElementById('colorSelect').value;
+  window.currentChartMetric = metric;
+
+  if (typeof window.assignDatasetColors === 'function') {
+    window.assignDatasetColors();
+  }
 
   if (['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'].includes(metric)) {
     window.notify?.('This is an aggregate frametime metric. Use the Statistics tab instead of charting.', 'info');
@@ -516,28 +644,24 @@ function addToChartCore() {
     const groups = indices.map(i =>
       sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
     );
+    const colors = indices.map(i => window.allDatasets[i].color || getBenchmarkColor(i));
 
     window.chartLabels = labels.slice();
-
-    const violinFill = hexToRgba(hexColor, 0.3);
-    const borderClr  = hexToRgba(hexColor, 1.0);
-    const grayBorder = 'rgba(80,80,80,1)';
-    const grayFill   = 'rgba(80,80,80,0.4)';
 
     window.chartDatasets = [{
       label: `${metric} Density`,
       type: 'violin',
       data: groups,
-      backgroundColor: labels.map(() => violinFill),
-      borderColor: labels.map(() => borderClr),
+      backgroundColor: colors.map(c => hexToRgba(c, 0.3)),
+      borderColor: colors,
       borderWidth: 1,
       order: 2
     }, {
       label: `${metric} Quartiles`,
       type: 'boxplot',
       data: groups,
-      backgroundColor: labels.map(() => grayFill),
-      borderColor: labels.map(() => grayBorder),
+      backgroundColor: colors.map(() => 'rgba(80,80,80,0.4)'),
+      borderColor: colors.map(() => 'rgba(80,80,80,1)'),
       borderWidth: 2,
       order: 1,
       barPercentage: 0.05,
@@ -556,14 +680,15 @@ function addToChartCore() {
     const groups = indices.map(i =>
       sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
     );
+    const colors = indices.map(i => window.allDatasets[i].color || getBenchmarkColor(i));
 
     window.chartLabels = labels.slice();
     window.chartDatasets = [{
       label: `${metric} Quartiles`,
       type: 'boxplot',
       data: groups,
-      backgroundColor: labels.map(() => hexToRgba(hexColor, 0.4)),
-      borderColor: labels.map(() => hexToRgba(hexColor, 1.0)),
+      backgroundColor: colors.map(c => hexToRgba(c, 0.4)),
+      borderColor: colors,
       borderWidth: 2
     }];
 
@@ -588,16 +713,20 @@ function addToChartCore() {
       const { points, totalPoints, displayedPoints } = getLineScatterPoints(ds, metric, useValueX);
       if (!points.length) return;
 
+      const seriesColor = ds.color || getBenchmarkColor(idx);
+
       cfg = {
-        label: `${ds.name} - ${metric}`,
+        label: ds.name,
         data: points,
         totalPoints,
         displayedPoints,
-        borderColor: hexColor,
-        backgroundColor: hexColor,
+        borderColor: seriesColor,
+        backgroundColor: seriesColor,
+        borderWidth: 2,
         pointRadius: chartType === 'scatter' ? 2 : 0,
         pointHitRadius: chartType === 'line' ? 4 : 2,
         showLine: chartType === 'line',
+        spanGaps: true,
         fill: false,
         parsing: false,
         sourceDatasetIndex: idx,
@@ -605,13 +734,17 @@ function addToChartCore() {
       };
     } else if (chartType === 'histogram') {
       const bins = buildHistogram(vals);
+      const seriesColor = ds.color || getBenchmarkColor(idx);
       cfg = {
-        label: `${ds.name} - ${metric}`,
+        label: ds.name,
         data: bins.counts.map((c, i) => ({ x: bins.labels[i], y: c })),
         type: 'bar',
-        backgroundColor: hexColor
+        backgroundColor: hexToRgba(seriesColor, 0.7),
+        borderColor: seriesColor,
+        borderWidth: 1
       };
     } else if (chartType === 'qqplot') {
+      const seriesColor = ds.color || getBenchmarkColor(idx);
       const qq = buildQQPlot(vals);
       const mean = jStat.mean(vals);
       const std = jStat.stdev(vals);
@@ -628,10 +761,10 @@ function addToChartCore() {
       ];
 
       window.chartDatasets.push({
-        label: `${ds.name} - ${metric} (Data)`,
+        label: `${ds.name} (data)`,
         data: qq,
-        borderColor: hexColor,
-        backgroundColor: hexColor,
+        borderColor: seriesColor,
+        backgroundColor: seriesColor,
         pointRadius: 2,
         showLine: false
       });
@@ -899,6 +1032,8 @@ function displayRawDataPage(dataset, columns, page = 0) {
 window.displayRawData = displayRawData;
 
 // Expose your chart functionality to the global scope
+window.getBenchmarkColor = getBenchmarkColor;
+window.assignDatasetColors = assignDatasetColors;
 window.buildHistogram = buildHistogram;
 window.buildQQPlot = buildQQPlot;
 window.renderChart = renderChart;

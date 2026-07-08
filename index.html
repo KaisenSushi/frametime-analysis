@@ -108,11 +108,11 @@
               </div>
 
               <div class="viz-field-row viz-color-row">
-                <label class="viz-field" for="colorSelect">Color</label>
+                <label class="viz-field" for="colorSelect">Dataset color</label>
                 <div class="color-picker-container">
-                  <input type="color" id="colorSelect" value="#4bc0c0" />
-                  <div class="color-preview" id="colorPreview" style="background-color:#4bc0c0;"></div>
-                  <button id="randomColorBtn" class="secondary-button mini" type="button">Random</button>
+                  <input type="color" id="colorSelect" value="#800000" />
+                  <div class="color-preview" id="colorPreview" style="background-color:#800000;"></div>
+                  <button id="randomColorBtn" class="secondary-button mini" type="button" title="Pick a palette color">Palette</button>
                 </div>
               </div>
 
@@ -142,6 +142,8 @@
                 </div>
               </div>
             </div>
+
+            <p class="viz-chart-hint">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.</p>
 
             <div class="chart-container" id="chartContainer">
               <canvas id="mainChart"></canvas>

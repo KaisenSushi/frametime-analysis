@@ -64,15 +64,17 @@ document.addEventListener('DOMContentLoaded', () => {
     clearChartBtn.disabled = true;  // initially disabled until user adds a dataset
   }
 
-  // 6. Random color generator
+  // 6. Palette color for selected dataset(s)
   const randomColorBtn = document.getElementById('randomColorBtn');
   if (randomColorBtn) {
     randomColorBtn.addEventListener('click', () => {
       const colorSelect = document.getElementById('colorSelect');
-      if (colorSelect) {
-        colorSelect.value = randomColor();
-        updateColorPreview();
-      }
+      if (!colorSelect) return;
+      const idx = Math.floor(Math.random() * 14);
+      colorSelect.value = typeof window.getBenchmarkColor === 'function'
+        ? window.getBenchmarkColor(idx)
+        : randomColor();
+      applyColorToSelectedDatasets();
     });
   }
 
@@ -104,10 +106,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // 12. Color preview updates
   const colorSelect = document.getElementById('colorSelect');
   if (colorSelect) {
-    const previewUpdate = () => updateColorPreview();
+    const previewUpdate = () => applyColorToSelectedDatasets();
     colorSelect.addEventListener('input', previewUpdate);
     colorSelect.addEventListener('change', previewUpdate);
-    updateColorPreview(); // initialize
+    updateColorPreview();
   }
 
   // 13. Initialize chart height
@@ -121,6 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.updateMetricDropdowns === 'function') {
       window.updateMetricDropdowns();
     }
+    syncColorPickerFromSelection();
   });
 
   // 17. Any other initialization logic you need
@@ -133,13 +136,16 @@ document.addEventListener('DOMContentLoaded', () => {
   if (datasetSelect) {
     datasetSelect.addEventListener('change', () => {
       updateMetricDropdowns();
+      syncColorPickerFromSelection();
     });
   }
 
-  // Initialize chart container empty state
   const chartContainer = document.getElementById('chartContainer');
-  if (chartContainer && (!window.chartDatasets || window.chartDatasets.length === 0)) {
-    chartContainer.classList.add('empty');
+  if (chartContainer) {
+    if (!window.chartDatasets || window.chartDatasets.length === 0) {
+      chartContainer.classList.add('empty');
+    }
+    chartContainer.addEventListener('dblclick', resetChartZoom);
   }
 
   // Initialize statistics tab with empty state
@@ -244,6 +250,33 @@ function updateColorPreview() {
   const preview = document.getElementById('colorPreview');
   if (colorInput && preview) {
     preview.style.backgroundColor = colorInput.value;
+  }
+}
+
+function syncColorPickerFromSelection() {
+  const sel = document.getElementById('datasetSelect');
+  const colorInput = document.getElementById('colorSelect');
+  if (!sel || !colorInput || !sel.selectedOptions.length) return;
+  const ds = window.allDatasets?.[+sel.selectedOptions[0].value];
+  if (ds?.color) {
+    colorInput.value = ds.color;
+    updateColorPreview();
+  }
+}
+
+function applyColorToSelectedDatasets() {
+  const colorInput = document.getElementById('colorSelect');
+  const sel = document.getElementById('datasetSelect');
+  if (!colorInput) return;
+  updateColorPreview();
+  if (!sel || !sel.selectedOptions.length) return;
+  const color = colorInput.value;
+  Array.from(sel.selectedOptions).forEach(opt => {
+    const ds = window.allDatasets?.[+opt.value];
+    if (ds) ds.color = color;
+  });
+  if (typeof window.refreshDatasetLists === 'function') {
+    window.refreshDatasetLists();
   }
 }
 
