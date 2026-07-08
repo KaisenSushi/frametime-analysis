@@ -53,6 +53,57 @@ const BAR_STAT_DEFS = [
 
 const BAR_STAT_DEF_MAP = Object.fromEntries(BAR_STAT_DEFS.map(d => [d.key, d]));
 
+function formatSummaryBarValue(value) {
+  if (!Number.isFinite(value)) return '';
+  if (typeof window.formatStatValue === 'function') {
+    return window.formatStatValue(window.currentChartMetric, 'avg', value);
+  }
+  return value.toFixed(2);
+}
+
+const summaryBarLabelsPlugin = {
+  id: 'summaryBarLabels',
+  afterDatasetsDraw(chart) {
+    if (!chart.options.plugins?.summaryBarLabels?.enabled) return;
+
+    const { ctx } = chart;
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 11px system-ui, sans-serif';
+
+    chart.data.datasets.forEach((dataset, dsIndex) => {
+      const meta = chart.getDatasetMeta(dsIndex);
+      if (meta.hidden) return;
+
+      meta.data.forEach((bar, index) => {
+        const value = dataset.data[index];
+        if (!Number.isFinite(value)) return;
+
+        const text = formatSummaryBarValue(value);
+        const { x, y, base } = bar.getProps(['x', 'y', 'base'], true);
+        const barEnd = Math.max(x, base);
+        const barStart = Math.min(x, base);
+        const barWidth = barEnd - barStart;
+        const textWidth = ctx.measureText(text).width;
+
+        if (barWidth > textWidth + 16) {
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.fillText(text, barStart + 8, y);
+        } else {
+          ctx.fillStyle = CHART_TEXT;
+          ctx.fillText(text, barEnd + 6, y);
+        }
+      });
+    });
+
+    ctx.restore();
+  }
+};
+
+if (window.Chart) {
+  Chart.register(summaryBarLabelsPlugin);
+}
+
 function getSelectedBarStats() {
   return Array.from(document.querySelectorAll('#barStatGroup .toggle-button.active'))
     .map(btn => btn.dataset.stat)
@@ -85,9 +136,11 @@ function buildSummaryBarChart(indices, metric, statKeys) {
       data: benchStats.map(s => s[statKey]),
       backgroundColor: def?.color || '#888',
       borderColor: def?.color || '#888',
-      borderWidth: 1,
-      barPercentage: 0.85,
-      categoryPercentage: 0.9
+      borderWidth: 0,
+      borderRadius: 10,
+      borderSkipped: false,
+      barPercentage: 0.82,
+      categoryPercentage: 0.88
     };
   });
 
@@ -598,11 +651,12 @@ function renderChart(chartType, opts = {}) {
             pointStyle: 'line'
           }
         },
-        zoom: buildZoomOptions()
+        zoom: chartType === 'summarybar' ? false : buildZoomOptions()
       },
       elements: {
         line: { borderWidth: 2, tension: 0 },
-        point: { radius: 0, hitRadius: 4 }
+        point: { radius: 0, hitRadius: 4 },
+        bar: { borderRadius: 10, borderSkipped: false }
       }
     }
   };
@@ -614,7 +668,9 @@ function renderChart(chartType, opts = {}) {
   if (chartType === 'summarybar') {
     cfg.options.indexAxis = 'y';
     cfg.options.plugins.legend.labels.usePointStyle = false;
-    cfg.options.plugins.legend.labels.pointStyle = 'rect';
+    cfg.options.plugins.legend.labels.pointStyle = 'rectRounded';
+    cfg.options.plugins.summaryBarLabels = { enabled: true };
+    cfg.options.layout = { padding: { right: 48 } };
   }
 
   if (chartType === 'violin' || chartType === 'boxplot') {

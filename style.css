@@ -67,20 +67,10 @@ body {
 }
 
 .viz-panel-subhead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   margin-bottom: 8px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-}
-
-.viz-link-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .viz-bar-hint {
