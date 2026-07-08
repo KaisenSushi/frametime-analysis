@@ -49,6 +49,47 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.viz-bar-stats {
+  margin: 10px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.viz-bar-stats .toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.viz-bar-stats .toggle-button {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.viz-panel-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.viz-link-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.viz-bar-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
 .hidden { display: none !important; }
 
 /* ── App shell ── */

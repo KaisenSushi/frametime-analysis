@@ -97,6 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   setupStatsSidebarControls();
+  setupVizChartTypeControls();
 
   // 10. Toggle buttons
   document.querySelectorAll('.toggle-button').forEach(btn => {
@@ -199,6 +200,59 @@ function populateAllDatasetSelects() {
       }
     }
   });
+}
+
+// Show/hide visualization controls based on chart type.
+function setupVizChartTypeControls() {
+  const chartTypeSelect = document.getElementById('chartTypeSelect');
+  if (!chartTypeSelect) return;
+
+  const update = () => updateVizControlsForChartType();
+  chartTypeSelect.addEventListener('change', update);
+  update();
+
+  const presets = {
+    barStatPresetCap: ['avg', 'low1', 'p1'],
+    barStatPresetCore: ['max', 'avg', 'min', 'low1', 'stdev'],
+    barStatPresetAll: BAR_STAT_PRESET_ALL
+  };
+
+  Object.entries(presets).forEach(([id, keys]) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener('click', () => setBarStatPreset(keys));
+  });
+}
+
+const BAR_STAT_PRESET_ALL = [
+  'max', 'avg', 'min', 'p1', 'p01', 'p001', 'low1', 'low01', 'low001', 'stdev'
+];
+
+function setBarStatPreset(statKeys) {
+  const set = new Set(statKeys);
+  document.querySelectorAll('#barStatGroup .toggle-button').forEach(btn => {
+    btn.classList.toggle('active', set.has(btn.dataset.stat));
+  });
+}
+
+function updateVizControlsForChartType() {
+  const type = document.getElementById('chartTypeSelect')?.value;
+  const isSummary = type === 'summarybar';
+
+  document.getElementById('vizBarStatsPanel')?.classList.toggle('hidden', !isSummary);
+  document.querySelector('.viz-color-row')?.classList.toggle('hidden', isSummary);
+  document.getElementById('useValueX')?.closest('.viz-check')?.classList.toggle('hidden', isSummary);
+
+  const hint = document.querySelector('.viz-chart-hint');
+  if (hint) {
+    hint.textContent = isSummary
+      ? 'Horizontal summary bars per dataset. Choose stats above, then Add to chart. Click legend to toggle stats.'
+      : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.';
+  }
+
+  const addBtn = document.getElementById('addToChartBtn');
+  if (addBtn) {
+    addBtn.textContent = isSummary ? 'Build summary bar' : 'Add to chart';
+  }
 }
 
 // Wire the Statistics sidebar helper links (dataset select all/clear, metric presets).

@@ -104,7 +104,32 @@
                   <option value="boxplot">Box plot</option>
                   <option value="violin">Violin</option>
                   <option value="qqplot">Q-Q plot</option>
+                  <option value="summarybar">Summary bar</option>
                 </select>
+              </div>
+
+              <div id="vizBarStatsPanel" class="viz-bar-stats hidden">
+                <div class="viz-panel-subhead">
+                  <span>Summary statistics</span>
+                  <div class="viz-link-row">
+                    <button type="button" class="viz-link" id="barStatPresetCap" title="Average, 1% Low, 1%ile">CapFrameX (3)</button>
+                    <button type="button" class="viz-link" id="barStatPresetCore">Core</button>
+                    <button type="button" class="viz-link" id="barStatPresetAll">All</button>
+                  </div>
+                </div>
+                <div class="toggle-group compact" id="barStatGroup">
+                  <div class="toggle-button" data-stat="max">Max</div>
+                  <div class="toggle-button active" data-stat="avg">Avg</div>
+                  <div class="toggle-button" data-stat="min">Min</div>
+                  <div class="toggle-button active" data-stat="p1">1%ile</div>
+                  <div class="toggle-button" data-stat="p01">0.1%ile</div>
+                  <div class="toggle-button" data-stat="p001">0.01%ile</div>
+                  <div class="toggle-button active" data-stat="low1">1% Low</div>
+                  <div class="toggle-button" data-stat="low01">0.1% Low</div>
+                  <div class="toggle-button" data-stat="low001">0.01% Low</div>
+                  <div class="toggle-button" data-stat="stdev">STDEV</div>
+                </div>
+                <p class="viz-bar-hint">Pick any number of stats to compare across selected datasets.</p>
               </div>
 
               <div class="viz-field-row viz-color-row">

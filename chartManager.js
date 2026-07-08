@@ -37,6 +37,78 @@ function initChartDefaults() {
 
 initChartDefaults();
 
+/** CapFrameX / FTA-style summary bar stat colors */
+const BAR_STAT_DEFS = [
+  { key: 'max',    label: 'Max',       color: 'rgb(0,70,0)' },
+  { key: 'avg',    label: 'Avg',       color: 'rgb(0,140,0)' },
+  { key: 'min',    label: 'Min',       color: 'rgb(0,210,0)' },
+  { key: 'p1',     label: '1%ile',     color: 'rgb(0,0,70)' },
+  { key: 'p01',    label: '0.1%ile',   color: 'rgb(0,0,140)' },
+  { key: 'p001',   label: '0.01%ile',  color: 'rgb(0,0,210)' },
+  { key: 'low1',   label: '1% Low',    color: 'rgb(70,0,0)' },
+  { key: 'low01',  label: '0.1% Low',  color: 'rgb(140,0,0)' },
+  { key: 'low001', label: '0.01% Low', color: 'rgb(210,0,0)' },
+  { key: 'stdev',  label: 'STDEV',     color: 'rgb(140,140,140)' }
+];
+
+const BAR_STAT_DEF_MAP = Object.fromEntries(BAR_STAT_DEFS.map(d => [d.key, d]));
+
+function getSelectedBarStats() {
+  return Array.from(document.querySelectorAll('#barStatGroup .toggle-button.active'))
+    .map(btn => btn.dataset.stat)
+    .filter(Boolean);
+}
+
+function getStatsSeriesForChart(dataset, metric) {
+  if (typeof window.collectMetricValues === 'function') {
+    return window.collectMetricValues(dataset, metric);
+  }
+  return getMetricSeries(dataset, metric);
+}
+
+function buildSummaryBarChart(indices, metric, statKeys) {
+  const labels = indices.map(i => window.allDatasets[i].name);
+  const benchStats = indices.map(i => {
+    const ds = window.allDatasets[i];
+    const values = getStatsSeriesForChart(ds, metric);
+    return window.calculateStatistics(values, metric);
+  });
+
+  window.chartLabels = labels;
+  window.chartDatasets = statKeys.map(statKey => {
+    const def = BAR_STAT_DEF_MAP[statKey];
+    const label = def?.label || (typeof window.getStatDisplayName === 'function'
+      ? window.getStatDisplayName(statKey)
+      : statKey);
+    return {
+      label,
+      data: benchStats.map(s => s[statKey]),
+      backgroundColor: def?.color || '#888',
+      borderColor: def?.color || '#888',
+      borderWidth: 1,
+      barPercentage: 0.85,
+      categoryPercentage: 0.9
+    };
+  });
+
+  adjustSummaryBarHeight(indices.length);
+}
+
+function adjustSummaryBarHeight(datasetCount) {
+  const chartContainer = document.getElementById('chartContainer');
+  const range = document.getElementById('chartHeight');
+  if (!chartContainer) return;
+  const autoMin = Math.max(280, 72 + datasetCount * 48);
+  chartContainer.style.minHeight = autoMin + 'px';
+  if (range && +range.value < autoMin) {
+    range.value = String(Math.min(900, autoMin));
+    chartContainer.style.height = range.value + 'px';
+    const heightValSpan = document.getElementById('chartHeightValue');
+    if (heightValSpan) heightValSpan.textContent = range.value + 'px';
+    if (window.mainChart) window.mainChart.resize();
+  }
+}
+
 // Cap rendered points so large captures stay responsive.
 const MAX_LINE_SCATTER_POINTS = 4500;
 const MAX_DISTRIBUTION_POINTS = 6000;
@@ -294,7 +366,7 @@ function buildQQPlot(data) {
 }
 
 function getControllerType(chartType) {
-  if (chartType === 'histogram') return 'bar';
+  if (chartType === 'histogram' || chartType === 'summarybar') return 'bar';
   // FTA uses scatter + showLine for performant time-series lines
   if (chartType === 'line' || chartType === 'qqplot' || chartType === 'scatter') return 'scatter';
   if (chartType === 'violin') return 'violin';
@@ -384,6 +456,14 @@ function buildChartScales(chartType) {
   if (chartType === 'histogram') {
     scales.x = { type: 'category', title: { display: true, text: 'Bin Range', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
     scales.y = styleLinearAxis({}, 'Count');
+  } else if (chartType === 'summarybar') {
+    scales.x = styleLinearAxis({ min: 0, grid: { display: true } }, getYAxisLabel(window.currentChartMetric));
+    scales.y = {
+      type: 'category',
+      grid: { display: false },
+      ticks: { color: CHART_TEXT, autoSkip: false },
+      border: { color: CHART_BORDER }
+    };
   } else if (chartType === 'qqplot') {
     scales.x = styleLinearAxis({}, 'Theoretical Quantiles');
     scales.y = styleLinearAxis({}, 'Sample Quantiles');
@@ -426,7 +506,8 @@ function renderChart(chartType, opts = {}) {
     window.mainChart &&
     window.currentChartType === chartType &&
     chartType !== 'violin' &&
-    chartType !== 'boxplot';
+    chartType !== 'boxplot' &&
+    chartType !== 'summarybar';
 
   if (!Array.isArray(window.chartDatasets) || window.chartDatasets.length === 0) {
     if (window.mainChart) {
@@ -490,6 +571,14 @@ function renderChart(chartType, opts = {}) {
                 ];
               }
               const ds = ctx.dataset;
+              if (window.currentChartType === 'summarybar') {
+                const val = ctx.raw;
+                if (!Number.isFinite(val)) return `${ctx.dataset.label}: N/A`;
+                const formatted = typeof window.formatStatValue === 'function'
+                  ? window.formatStatValue(window.currentChartMetric, 'avg', val)
+                  : val.toFixed(2);
+                return `${ctx.dataset.label}: ${formatted}`;
+              }
               if (ds.totalPoints && ds.displayedPoints && ds.totalPoints > ds.displayedPoints) {
                 return `${ds.label}: ${ctx.formattedValue} (${ds.displayedPoints.toLocaleString()} of ${ds.totalPoints.toLocaleString()} frames)`;
               }
@@ -518,8 +607,17 @@ function renderChart(chartType, opts = {}) {
     }
   };
 
-  if (chartType === 'violin' || chartType === 'boxplot') {
+  if (chartType === 'violin' || chartType === 'boxplot' || chartType === 'summarybar') {
     cfg.data.labels = window.chartLabels.slice();
+  }
+
+  if (chartType === 'summarybar') {
+    cfg.options.indexAxis = 'y';
+    cfg.options.plugins.legend.labels.usePointStyle = false;
+    cfg.options.plugins.legend.labels.pointStyle = 'rect';
+  }
+
+  if (chartType === 'violin' || chartType === 'boxplot') {
 
     let minValue = Infinity;
     let maxValue = -Infinity;
@@ -620,7 +718,33 @@ function addToChartCore() {
   }
 
   if (['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'].includes(metric)) {
-    window.notify?.('This is an aggregate frametime metric. Use the Statistics tab instead of charting.', 'info');
+    if (chartType !== 'summarybar') {
+      window.notify?.('This is an aggregate frametime metric. Use Summary bar or the Statistics tab.', 'info');
+      return;
+    }
+  }
+
+  // ---- SUMMARY BAR (CapFrameX / FTA style, user-picked stats) ----
+  if (chartType === 'summarybar') {
+    const statKeys = getSelectedBarStats();
+    if (!statKeys.length) {
+      window.notify?.('Select at least one summary statistic.', 'warning');
+      return;
+    }
+
+    if (window.chartDatasets.length && window.currentChartType && window.currentChartType !== 'summarybar') {
+      window.notify?.(
+        `You already started a "${window.currentChartType}" chart. Clear it first to switch to summary bar.`,
+        'warning'
+      );
+      return;
+    }
+
+    window.currentChartType = 'summarybar';
+    buildSummaryBarChart(indices, metric, statKeys);
+    renderChart('summarybar');
+    updateDatasetOrder();
+    document.getElementById('clearChartBtn')?.removeAttribute('disabled');
     return;
   }
 

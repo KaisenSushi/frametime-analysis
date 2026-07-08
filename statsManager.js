@@ -816,6 +816,7 @@ function getStatDisplayName(stat) {
 }
 
 // Expose these to the global scope:
+window.collectMetricValues = collectMetricValues;
 window.getMetricValue = getMetricValue;
 window.calculateStepwiseRelativeSD = calculateStepwiseRelativeSD;
 window.calculateCoefficientOfVariation = calculateCoefficientOfVariation;
