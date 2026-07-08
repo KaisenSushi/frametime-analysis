@@ -203,11 +203,22 @@
               <p>Select datasets and metrics, then click <strong>Calculate statistics</strong></p>
             </div>
 
-            <div class="table-wrap">
+            <div class="table-wrap" id="statsMainTableWrap">
               <table id="statsTable" class="stats-table">
                 <thead></thead>
                 <tbody></tbody>
               </table>
+            </div>
+
+            <div id="statsAggregateWrap" class="stats-aggregate-wrap hidden">
+              <div class="stats-aggregate-title">Stability metrics</div>
+              <p class="stats-aggregate-desc">Single value per dataset (lower is smoother).</p>
+              <div class="table-wrap stats-aggregate-table-wrap">
+                <table id="statsAggregateTable" class="stats-table stats-aggregate-table">
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

@@ -42,12 +42,21 @@ const METRIC_BLACKLIST = new Set([
 const DERIVED_METRICS = [
   'RenderedFPS',
   'DisplayedFPS',
-  'Stepwise_Relative_SD'
+  'Stepwise_Relative_SD',
+  'Coefficient_of_Variation',
+  'RMSSD'
 ];
+
+const FRAMETIME_DERIVED_METRICS = new Set([
+  'Stepwise_Relative_SD',
+  'Coefficient_of_Variation',
+  'RMSSD'
+]);
 
 const CORE_METRICS = [
   'FPS', 'FrameTime', 'RenderedFPS', 'DisplayedFPS',
-  'MsGPUBusy', 'MsUntilDisplayed', 'Stepwise_Relative_SD'
+  'MsGPUBusy', 'MsUntilDisplayed',
+  'Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'
 ];
 
 const STATS_DEFAULT_ACTIVE = new Set(CORE_METRICS);
@@ -57,7 +66,7 @@ const STATS_METRIC_GROUPS = [
   { label: 'Frame timing', metrics: ['FPS', 'FrameTime'] },
   { label: 'Display pipeline', metrics: ['RenderedFPS', 'DisplayedFPS'] },
   { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] },
-  { label: 'Stability', metrics: ['Stepwise_Relative_SD'], hint: 'Frame-to-frame relative variability (lower = smoother).' }
+  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'], hint: 'Derived from frametime. Lower is smoother.' }
 ];
 
 // global UI flag (default = basic mode)
@@ -473,7 +482,9 @@ function updateMetricDropdowns() {
     if (hasDisplay) numeric.add('DisplayedFPS');
     if (hasGpuBusy) numeric.add('MsGPUBusy');
     if (hasUntilDisplayed) numeric.add('MsUntilDisplayed');
-    if (hasFrametimes) numeric.add('Stepwise_Relative_SD');
+    if (hasFrametimes) {
+      FRAMETIME_DERIVED_METRICS.forEach(m => numeric.add(m));
+    }
 
     return numeric;
   }
@@ -520,7 +531,7 @@ function updateMetricDropdowns() {
   DERIVED_METRICS.forEach(dm => {
     const available = (window.allDatasets || []).some(ds =>
       ds.rows?.length && (
-        dm === 'Stepwise_Relative_SD'
+        FRAMETIME_DERIVED_METRICS.has(dm)
           ? ds.rows.some(r => Number.isFinite(r.FrameTime))
           : ds.rows.some(r => getMetricValue(r, dm) != null)
       )
@@ -584,7 +595,9 @@ const STATS_CHIP_LABELS = {
   'DisplayedFPS': 'Displayed FPS',
   'MsGPUBusy': 'MsGPUBusy',
   'MsUntilDisplayed': 'MsUntilDisplayed',
-  'Stepwise_Relative_SD': 'Stepwise Rel. SD'
+  'Stepwise_Relative_SD': 'Stepwise Rel. SD',
+  'Coefficient_of_Variation': 'CV (σ/μ)',
+  'RMSSD': 'RMSSD'
 };
 
 function getMetricChipLabel(metric) {
@@ -671,6 +684,8 @@ function getMetricDisplayName(metric) {
     'RenderedFPS': 'Rendered FPS (MsBetweenPresents)',
     'DisplayedFPS': 'Displayed FPS (MsBetweenDisplayChange)',
     'Stepwise_Relative_SD': 'Stepwise Relative SD',
+    'Coefficient_of_Variation': 'Coefficient of Variation (σ/μ)',
+    'RMSSD': 'RMSSD (ms)',
     'MsBetweenPresents': 'MsBetweenPresents (ms)',
     'MsBetweenDisplayChange': 'MsBetweenDisplayChange (ms)',
     'MsInPresentAPI': 'Time in Present API (ms)',
@@ -696,13 +711,15 @@ function getMetricDisplayName(metric) {
  */
 function getMetricDescription(metric) {
   const descriptions = {
-    'FrameTime': 'Time between presented frames — lower is smoother.',
-    'FPS': 'Frames per second (harmonic mean) — higher is better.',
+    'FrameTime': 'Time between presented frames. Lower is smoother.',
+    'FPS': 'Frames per second (harmonic mean). Higher is better.',
     'RenderedFPS': 'Frames the GPU submitted for presentation.',
-    'DisplayedFPS': 'Frames actually shown on screen — reveals smoothness loss.',
-    'MsGPUBusy': 'GPU work time per frame — key for input lag even at stable FPS.',
+    'DisplayedFPS': 'Frames actually shown on screen. Reveals smoothness loss.',
+    'MsGPUBusy': 'GPU work time per frame. Key for input lag even at stable FPS.',
     'MsUntilDisplayed': 'Time from CPU frame completion to display output.',
-    'Stepwise_Relative_SD': 'Frame-to-frame relative variability — lower is smoother.'
+    'Stepwise_Relative_SD': 'Frame-to-frame relative variability. Lower is smoother.',
+    'Coefficient_of_Variation': 'Stdev divided by mean of frametimes. Lower is more consistent.',
+    'RMSSD': 'Root mean square of successive frametime differences (ms). Lower is smoother.'
   };
   return descriptions[metric] || '';
 }

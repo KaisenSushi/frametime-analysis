@@ -491,8 +491,8 @@ function addToChartCore() {
   const chartType = document.getElementById('chartTypeSelect').value;
   const hexColor  = document.getElementById('colorSelect').value;
 
-  if (metric === 'Stepwise_Relative_SD') {
-    window.notify?.('Stepwise Relative SD is an aggregate metric — use the Statistics tab instead of charting.', 'info');
+  if (['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'].includes(metric)) {
+    window.notify?.('This is an aggregate frametime metric. Use the Statistics tab instead of charting.', 'info');
     return;
   }
 

@@ -34,7 +34,61 @@ function calculateStepwiseRelativeSD(values) {
   return Math.sqrt(sumSq / (n - 1));
 }
 
-// Palette used to give each dataset a stable colour stripe in the stats table.
+/**
+ * Coefficient of Variation — relative variability of the frametime series.
+ * CV = σ / μ (sample stdev divided by mean).
+ * @param {number[]} values - Frametime series (ms)
+ * @returns {number}
+ */
+function calculateCoefficientOfVariation(values) {
+  const series = (values || []).filter(v => Number.isFinite(v) && v > 0);
+  const n = series.length;
+  if (n < 2) return NaN;
+
+  const mean = series.reduce((s, v) => s + v, 0) / n;
+  if (mean === 0) return NaN;
+
+  const stdev = (typeof jStat?.stdev === 'function')
+    ? jStat.stdev(series, true)
+    : Math.sqrt(series.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1));
+
+  return stdev / mean;
+}
+
+/**
+ * RMSSD — root mean square of successive frametime differences.
+ * RMSSD = sqrt((1 / (n - 1)) * Σ_{t=2}^{n} (F_t - F_{t-1})²)
+ * @param {number[]} values - Frametime series (ms)
+ * @returns {number}
+ */
+function calculateRMSSD(values) {
+  const series = (values || []).filter(v => Number.isFinite(v) && v > 0);
+  const n = series.length;
+  if (n < 2) return NaN;
+
+  let sumSqDiff = 0;
+  for (let t = 1; t < n; t++) {
+    const diff = series[t] - series[t - 1];
+    sumSqDiff += diff * diff;
+  }
+  return Math.sqrt(sumSqDiff / (n - 1));
+}
+
+/** Metrics computed once over the full frametime series (not per frame). */
+const AGGREGATE_FRAMETIME_METRICS = new Set([
+  'Stepwise_Relative_SD',
+  'Coefficient_of_Variation',
+  'RMSSD'
+]);
+
+function calculateAggregateMetric(values, metricName) {
+  switch (metricName) {
+    case 'Stepwise_Relative_SD': return calculateStepwiseRelativeSD(values);
+    case 'Coefficient_of_Variation': return calculateCoefficientOfVariation(values);
+    case 'RMSSD': return calculateRMSSD(values);
+    default: return NaN;
+  }
+}
 const STATS_DATASET_COLORS = [
   '#4bc0c0', '#c084fc', '#f97316', '#38bdf8', '#f472b6',
   '#a3e635', '#fbbf24', '#818cf8', '#2dd4bf', '#fb7185'
@@ -44,9 +98,9 @@ function getDatasetColor(index) {
   return STATS_DATASET_COLORS[index % STATS_DATASET_COLORS.length];
 }
 
-// Stepwise Relative SD is a single aggregate; other metrics vary per stat column.
+// Single-value aggregate metrics derived from the frametime series.
 function isAggregateMetric(metric) {
-  return metric === 'Stepwise_Relative_SD';
+  return AGGREGATE_FRAMETIME_METRICS.has(metric);
 }
 
 function isFpsLikeMetric(metric) {
@@ -65,7 +119,8 @@ function isFpsLikeMetric(metric) {
  */
 function formatStatValue(metric, stat, value) {
   if (!Number.isFinite(value)) return 'N/A';
-  if (metric === 'Stepwise_Relative_SD') return value.toFixed(4);
+  if (metric === 'RMSSD') return value.toFixed(2);
+  if (metric === 'Stepwise_Relative_SD' || metric === 'Coefficient_of_Variation') return value.toFixed(4);
   if (isFpsLikeMetric(metric)) return value.toFixed(1);
   if (stat === 'stdev') return value.toFixed(3);
   return value.toFixed(2);
@@ -110,8 +165,8 @@ function getMetricValue(row, metric) {
     return findNumericKey(row, 'MsUntilDisplayed', 'MsUntilDisplayComplete');
   }
 
-  // Aggregate-only metric — not meaningful per row
-  if (metric === 'Stepwise_Relative_SD') {
+  // Aggregate-only metrics — not meaningful per row
+  if (AGGREGATE_FRAMETIME_METRICS.has(metric)) {
     return null;
   }
 
@@ -161,13 +216,13 @@ function calculateStatistics(arr, metricName = '') {
     };
   }
 
-  // Stepwise Relative SD is a single aggregate over the full series
-  if (metricName === 'Stepwise_Relative_SD') {
-    const srsd = calculateStepwiseRelativeSD(arr);
+  // Frametime-derived aggregate metrics
+  if (isAggregateMetric(metricName)) {
+    const aggregate = calculateAggregateMetric(arr, metricName);
     return {
-      max: srsd, min: srsd, avg: srsd, stdev: 0,
-      p1: srsd, p01: srsd, p001: srsd,
-      low1: srsd, low01: srsd, low001: srsd
+      max: aggregate, min: aggregate, avg: aggregate, stdev: 0,
+      p1: aggregate, p01: aggregate, p001: aggregate,
+      low1: aggregate, low01: aggregate, low001: aggregate
     };
   }
 
@@ -367,15 +422,18 @@ function analyzeFramePacing(frametimes) {
   };
 }
 
+function collectFrametimeSeries(dataset) {
+  return dataset.rows
+    .map(r => getMetricValue(r, 'FrameTime'))
+    .filter(v => typeof v === 'number' && v > 0);
+}
+
 /**
  * Collects the numeric series used to compute stats for a metric on a dataset.
- * Stepwise Relative SD is derived from the frametime series.
  */
 function collectMetricValues(dataset, metric) {
-  if (metric === 'Stepwise_Relative_SD') {
-    return dataset.rows
-      .map(r => getMetricValue(r, 'FrameTime'))
-      .filter(v => typeof v === 'number' && v > 0);
+  if (AGGREGATE_FRAMETIME_METRICS.has(metric)) {
+    return collectFrametimeSeries(dataset);
   }
   return dataset.rows
     .map(r => getMetricValue(r, metric))
@@ -456,7 +514,7 @@ function renderFPSGapNote(renderedAvg, displayedAvg) {
 
   if (gap > 2) {
     cls = 'warn';
-    text = `Rendered exceeds displayed by ${gap.toFixed(1)} FPS — possible GPU/driver processing overhead.`;
+    text = `Rendered exceeds displayed by ${gap.toFixed(1)} FPS. Possible GPU/driver processing overhead.`;
   } else if (gap < -0.5) {
     cls = 'good';
     text = `Displayed exceeds rendered by ${Math.abs(gap).toFixed(1)} FPS.`;
@@ -476,6 +534,16 @@ function resetStatsPanel() {
   if (statsTable) {
     const thead = statsTable.querySelector('thead');
     const tbody = statsTable.querySelector('tbody');
+    if (thead) thead.innerHTML = '';
+    if (tbody) tbody.innerHTML = '';
+  }
+
+  const aggregateWrap = document.getElementById('statsAggregateWrap');
+  const aggregateTable = document.getElementById('statsAggregateTable');
+  if (aggregateWrap) aggregateWrap.classList.add('hidden');
+  if (aggregateTable) {
+    const thead = aggregateTable.querySelector('thead');
+    const tbody = aggregateTable.querySelector('tbody');
     if (thead) thead.innerHTML = '';
     if (tbody) tbody.innerHTML = '';
   }
@@ -515,66 +583,59 @@ function updateStatsTable() {
 
   statsContent.classList.remove('empty-stats');
 
+  const regularMetrics = selectedMetrics.filter(m => !isAggregateMetric(m));
+  const aggregateMetrics = selectedMetrics.filter(m => isAggregateMetric(m));
+
+  const mainWrap = document.getElementById('statsMainTableWrap');
   const statsTable = document.getElementById('statsTable');
   const thead = statsTable.querySelector('thead');
   const tbody = statsTable.querySelector('tbody');
   thead.innerHTML = '';
   tbody.innerHTML = '';
 
-  // Flat table: one row per metric × dataset — no section headers or spacers.
-  const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th class="stats-corner">Metric</th><th>Dataset</th>';
-  selectedStats.forEach(stat => {
-    headerRow.innerHTML += `<th>${getStatDisplayName(stat)}</th>`;
-  });
-  thead.appendChild(headerRow);
+  if (regularMetrics.length) {
+    if (mainWrap) mainWrap.classList.remove('hidden');
 
-  let rowIndex = 0;
+    const headerRow = document.createElement('tr');
+    headerRow.innerHTML = '<th class="stats-corner">Metric</th><th>Dataset</th>';
+    selectedStats.forEach(stat => {
+      headerRow.innerHTML += `<th>${getStatDisplayName(stat)}</th>`;
+    });
+    thead.appendChild(headerRow);
 
-  selectedMetrics.forEach(metric => {
-    const aggregate = isAggregateMetric(metric);
-    const datasetStats = selectedDatasets.map(dataset => ({
-      name: dataset.name,
-      stats: calculateStatistics(collectMetricValues(dataset, metric), metric)
-    }));
-    const isFpsMetric = isFpsLikeMetric(metric);
-    const metricLabel = typeof window.getMetricChipLabel === 'function'
-      ? window.getMetricChipLabel(metric)
-      : getMetricDisplayName(metric);
+    let rowIndex = 0;
 
-    datasetStats.forEach((dsStats, dsIndex) => {
-      const row = document.createElement('tr');
-      row.className = 'stats-data-row';
-      if (rowIndex % 2 === 1) row.classList.add('stats-row-alt');
-      rowIndex++;
+    regularMetrics.forEach(metric => {
+      const datasetStats = selectedDatasets.map(dataset => ({
+        name: dataset.name,
+        stats: calculateStatistics(collectMetricValues(dataset, metric), metric)
+      }));
+      const isFpsMetric = isFpsLikeMetric(metric);
+      const metricLabel = typeof window.getMetricChipLabel === 'function'
+        ? window.getMetricChipLabel(metric)
+        : getMetricDisplayName(metric);
 
-      if (dsIndex === 0) {
-        const metricCell = document.createElement('td');
-        metricCell.className = 'stats-metric-cell';
-        metricCell.rowSpan = datasetStats.length;
-        metricCell.textContent = metricLabel;
-        metricCell.title = getMetricDisplayName(metric);
-        row.appendChild(metricCell);
-      }
+      datasetStats.forEach((dsStats, dsIndex) => {
+        const row = document.createElement('tr');
+        row.className = 'stats-data-row';
+        if (rowIndex % 2 === 1) row.classList.add('stats-row-alt');
+        rowIndex++;
 
-      const nameCell = document.createElement('td');
-      nameCell.className = 'dataset-name-cell stats-row-stripe';
-      nameCell.style.setProperty('--stripe', getDatasetColor(dsIndex));
-      nameCell.textContent = dsStats.name;
-      row.appendChild(nameCell);
+        if (dsIndex === 0) {
+          const metricCell = document.createElement('td');
+          metricCell.className = 'stats-metric-cell';
+          metricCell.rowSpan = datasetStats.length;
+          metricCell.textContent = metricLabel;
+          metricCell.title = getMetricDisplayName(metric);
+          row.appendChild(metricCell);
+        }
 
-      if (aggregate) {
-        selectedStats.forEach((stat, statIndex) => {
-          const cell = document.createElement('td');
-          if (statIndex === 0) {
-            cell.textContent = formatStatValue(metric, 'avg', dsStats.stats.avg);
-          } else {
-            cell.textContent = '—';
-            cell.classList.add('stats-na-cell');
-          }
-          row.appendChild(cell);
-        });
-      } else {
+        const nameCell = document.createElement('td');
+        nameCell.className = 'dataset-name-cell stats-row-stripe';
+        nameCell.style.setProperty('--stripe', getDatasetColor(dsIndex));
+        nameCell.textContent = dsStats.name;
+        row.appendChild(nameCell);
+
         selectedStats.forEach(stat => {
           const value = dsStats.stats[stat];
           const cell = document.createElement('td');
@@ -591,10 +652,84 @@ function updateStatsTable() {
 
           row.appendChild(cell);
         });
+
+        tbody.appendChild(row);
+      });
+    });
+  } else if (mainWrap) {
+    mainWrap.classList.add('hidden');
+  }
+
+  renderAggregateStatsTable(aggregateMetrics, selectedDatasets);
+}
+
+/**
+ * Compact pivot table for aggregate frametime metrics — one row per metric,
+ * one column per dataset (no empty stat columns).
+ */
+function renderAggregateStatsTable(aggregateMetrics, selectedDatasets) {
+  const wrap = document.getElementById('statsAggregateWrap');
+  const table = document.getElementById('statsAggregateTable');
+  if (!wrap || !table) return;
+
+  if (!aggregateMetrics.length) {
+    wrap.classList.add('hidden');
+    return;
+  }
+
+  wrap.classList.remove('hidden');
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+
+  const headerRow = document.createElement('tr');
+  headerRow.innerHTML = '<th class="stats-corner">Metric</th>';
+  selectedDatasets.forEach((ds, i) => {
+    const th = document.createElement('th');
+    th.className = 'stats-dataset-header';
+    th.title = ds.name;
+    th.innerHTML = `<span class="stats-header-stripe" style="--stripe:${getDatasetColor(i)}"></span><span class="stats-header-name">${ds.name}</span>`;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+
+  aggregateMetrics.forEach((metric, metricIndex) => {
+    const row = document.createElement('tr');
+    row.className = 'stats-data-row';
+    if (metricIndex % 2 === 1) row.classList.add('stats-row-alt');
+
+    const metricLabel = typeof window.getMetricChipLabel === 'function'
+      ? window.getMetricChipLabel(metric)
+      : getMetricDisplayName(metric);
+    const desc = getMetricDescription(metric);
+
+    const metricCell = document.createElement('td');
+    metricCell.className = 'stats-metric-cell stats-aggregate-metric';
+    metricCell.innerHTML = `<span class="stats-aggregate-name">${metricLabel}</span>${desc ? `<span class="stats-aggregate-hint">${desc}</span>` : ''}`;
+    row.appendChild(metricCell);
+
+    const values = selectedDatasets.map(ds =>
+      calculateAggregateMetric(collectFrametimeSeries(ds), metric)
+    );
+
+    values.forEach((value, dsIndex) => {
+      const cell = document.createElement('td');
+      cell.className = 'stats-aggregate-value';
+      cell.textContent = formatStatValue(metric, 'avg', value);
+
+      if (selectedDatasets.length > 1 && Number.isFinite(value)) {
+        const finite = values.filter(Number.isFinite);
+        const best = Math.min(...finite);
+        const worst = Math.max(...finite);
+        if (value === best) cell.classList.add('dataset-better-value');
+        else if (value === worst) cell.classList.add('dataset-worse-value');
       }
 
-      tbody.appendChild(row);
+      row.appendChild(cell);
     });
+
+    tbody.appendChild(row);
   });
 }
 
@@ -683,6 +818,8 @@ function getStatDisplayName(stat) {
 // Expose these to the global scope:
 window.getMetricValue = getMetricValue;
 window.calculateStepwiseRelativeSD = calculateStepwiseRelativeSD;
+window.calculateCoefficientOfVariation = calculateCoefficientOfVariation;
+window.calculateRMSSD = calculateRMSSD;
 window.calculateStatistics = calculateStatistics;
 window.calculatePercentile = calculatePercentile;
 window.analyzeStuttering = analyzeStuttering;
