@@ -166,8 +166,8 @@
       <section id="statistics" class="tab-content stats-page hidden">
         <div class="stats-layout">
           <aside class="stats-sidebar">
-            <div class="stats-sidebar-section">
-              <div class="stats-sidebar-heading">
+            <div class="viz-panel">
+              <div class="viz-panel-head">
                 <span>Datasets</span>
                 <div class="stats-link-row">
                   <button type="button" class="stats-link" id="statsSelectAll">Select all</button>
@@ -177,8 +177,8 @@
               <select id="statDatasetSelect" class="stats-dataset-select" multiple></select>
             </div>
 
-            <div class="stats-sidebar-section">
-              <div class="stats-sidebar-heading">
+            <div class="viz-panel">
+              <div class="viz-panel-head">
                 <span>Metrics</span>
                 <div class="stats-link-row">
                   <button type="button" class="stats-link" id="statsPresetCore">Core</button>
@@ -188,8 +188,8 @@
               <div id="statMetricsGroup" class="stats-metric-groups"></div>
             </div>
 
-            <div class="stats-sidebar-section">
-              <div class="stats-sidebar-heading"><span>Statistics</span></div>
+            <div class="viz-panel">
+              <div class="viz-panel-head"><span>Statistics</span></div>
               <div class="toggle-group compact" id="statsTypeGroup">
                 <div class="toggle-button active" data-stat="max">Max</div>
                 <div class="toggle-button active" data-stat="avg">Avg</div>
@@ -202,9 +202,8 @@
                 <div class="toggle-button" data-stat="low001">0.01% Low</div>
                 <div class="toggle-button active" data-stat="stdev">STDEV</div>
               </div>
+              <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
             </div>
-
-            <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
           </aside>
 
           <div class="stats-results">
