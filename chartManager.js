@@ -397,25 +397,73 @@ function rebuildCurrentLineScatterDatasets() {
 }
 
 /**
- * Builds Q-Q plot data points, comparing sample quantiles vs. theoretical normal quantiles.
+ * Evenly subsample a sorted array while preserving order statistics (for Q-Q plots).
+ * @param {number[]} sorted ascending values
+ * @param {number} maxPoints
+ * @returns {number[]}
+ */
+function subsampleSorted(sorted, maxPoints) {
+  if (sorted.length <= maxPoints) return sorted;
+  const out = new Array(maxPoints);
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = Math.min(
+      sorted.length - 1,
+      Math.floor((i * sorted.length) / maxPoints)
+    );
+    out[i] = sorted[idx];
+  }
+  return out;
+}
+
+/**
+ * Builds Q-Q plot data: sample quantiles vs theoretical normal quantiles.
+ * Uses Blom's plotting positions p = (i - 0.5) / n (rank i = 1..n).
+ * Reference line: y = mean + std * x (expected under normality).
  * @param {number[]} data
- * @returns {{x: number, y: number}[]}
+ * @returns {{ points: {x:number,y:number}[], refLine: {x:number,y:number}[], mean: number, std: number } | null}
  */
 function buildQQPlot(data) {
-  const sorted = (data.length > MAX_QQ_POINTS
-    ? sampleSeries(data, MAX_QQ_POINTS)
-    : data.slice()
-  ).sort((a, b) => a - b);
+  if (typeof jStat === 'undefined' || typeof jStat.normal?.inv !== 'function') {
+    console.error('jStat.normal.inv is not available for Q-Q plots.');
+    return null;
+  }
 
-  const n = sorted.length;
-  const qqPoints = new Array(n);
+  const sorted = data.filter(Number.isFinite).slice().sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
 
+  const sample = subsampleSorted(sorted, MAX_QQ_POINTS);
+  const n = sample.length;
+  const mean = jStat.mean(sample);
+  const std = jStat.stdev(sample);
+
+  const points = [];
   for (let i = 0; i < n; i++) {
     const p = (i + 0.5) / n;
     const z = jStat.normal.inv(p, 0, 1);
-    qqPoints[i] = { x: z, y: sorted[i] };
+    if (!Number.isFinite(z)) continue;
+    points.push({ x: z, y: sample[i] });
   }
-  return qqPoints;
+
+  if (points.length < 2) return null;
+
+  const zMin = points[0].x;
+  const zMax = points[points.length - 1].x;
+  const safeStd = Number.isFinite(std) && std > 0 ? std : 0;
+  const refLine = safeStd > 0
+    ? [
+        { x: zMin, y: mean + safeStd * zMin },
+        { x: zMax, y: mean + safeStd * zMax }
+      ]
+    : [
+        { x: zMin, y: mean },
+        { x: zMax, y: mean }
+      ];
+
+  return { points, refLine, mean, std: safeStd };
+}
+
+function isQQReferenceDataset(dataset) {
+  return dataset?.qqRole === 'reference';
 }
 
 function getControllerType(chartType) {
@@ -521,8 +569,16 @@ function buildChartScales(chartType) {
       border: { color: CHART_BORDER }
     };
   } else if (chartType === 'qqplot') {
-    scales.x = styleLinearAxis({}, 'Theoretical Quantiles');
-    scales.y = styleLinearAxis({}, 'Sample Quantiles');
+    const yTitle = getYAxisLabel(window.currentChartMetric);
+    scales.x = styleLinearAxis({}, 'Theoretical Quantiles (σ)');
+    scales.y = styleLinearAxis({}, `Sample Quantiles (${yTitle})`);
+    const extents = computeSeriesExtents(window.chartDatasets);
+    if (extents) {
+      if (extents.xMin !== undefined) scales.x.min = extents.xMin;
+      if (extents.xMax !== undefined) scales.x.max = extents.xMax;
+      scales.y.min = extents.yMin;
+      scales.y.max = extents.yMax;
+    }
   } else if (chartType === 'scatter' || chartType === 'line') {
     scales.x = styleLinearAxis({ grid: { display: false } }, xTitle);
     scales.y = styleLinearAxis({}, yTitle);
@@ -533,7 +589,10 @@ function buildChartScales(chartType) {
       scales.y.min = extents.yMin;
       scales.y.max = extents.yMax;
     }
-  } else if (chartType === 'violin' || chartType === 'boxplot') {
+  } else if (chartType === 'boxplot') {
+    scales.y = { type: 'category', title: { display: true, text: 'Dataset', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { display: false } };
+    scales.x = styleLinearAxis({ beginAtZero: false, grace: '10%' }, yTitle);
+  } else if (chartType === 'violin') {
     scales.x = { type: 'category', title: { display: true, text: 'Dataset', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
     scales.y = styleLinearAxis({ beginAtZero: false, grace: '10%' }, yTitle);
   } else {
@@ -556,6 +615,8 @@ function renderChart(chartType, opts = {}) {
     return;
   }
 
+  window.currentChartType = chartType;
+
   const ctx = canvas.getContext('2d');
   const incremental = Boolean(opts.incremental);
   const canIncremental = incremental &&
@@ -563,7 +624,8 @@ function renderChart(chartType, opts = {}) {
     window.currentChartType === chartType &&
     chartType !== 'violin' &&
     chartType !== 'boxplot' &&
-    chartType !== 'summarybar';
+    chartType !== 'summarybar' &&
+    chartType !== 'qqplot';
 
   if (!Array.isArray(window.chartDatasets) || window.chartDatasets.length === 0) {
     if (window.mainChart) {
@@ -627,6 +689,22 @@ function renderChart(chartType, opts = {}) {
                 ];
               }
               const ds = ctx.dataset;
+              if (window.currentChartType === 'qqplot') {
+                const raw = ctx.raw;
+                if (raw && typeof raw === 'object' && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
+                  if (ctx.dataset.qqRole === 'reference') {
+                    return `${ctx.dataset.label}: expected normal fit`;
+                  }
+                  const formatted = typeof window.formatStatValue === 'function'
+                    ? window.formatStatValue(window.currentChartMetric, 'avg', raw.y)
+                    : raw.y.toFixed(3);
+                  return [
+                    ctx.dataset.label,
+                    `Theoretical: ${raw.x.toFixed(3)} σ`,
+                    `Observed: ${formatted}`
+                  ];
+                }
+              }
               if (window.currentChartType === 'summarybar') {
                 const val = ctx.raw;
                 if (!Number.isFinite(val)) return `${ctx.dataset.label}: N/A`;
@@ -664,6 +742,14 @@ function renderChart(chartType, opts = {}) {
     }
   };
 
+  if (chartType === 'qqplot') {
+    cfg.options.plugins.legend.labels.filter = (item, chartData) => {
+      const datasets = chartData?.datasets ?? chartData?.data?.datasets;
+      return !isQQReferenceDataset(datasets?.[item.datasetIndex]);
+    };
+    cfg.options.elements.point.radius = 2.5;
+  }
+
   if (chartType === 'violin' || chartType === 'boxplot' || chartType === 'summarybar') {
     cfg.data.labels = window.chartLabels.slice();
   }
@@ -676,7 +762,13 @@ function renderChart(chartType, opts = {}) {
     cfg.options.layout = { padding: { right: 48 } };
   }
 
+  if (chartType === 'boxplot') {
+    cfg.options.indexAxis = 'y';
+  }
+
   if (chartType === 'violin' || chartType === 'boxplot') {
+    // For the horizontal boxplot the numeric values live on the x axis.
+    const valueAxis = chartType === 'boxplot' ? 'x' : 'y';
 
     let minValue = Infinity;
     let maxValue = -Infinity;
@@ -696,12 +788,19 @@ function renderChart(chartType, opts = {}) {
     if (Number.isFinite(minValue) && Number.isFinite(maxValue)) {
       const span = maxValue - minValue;
       const padding = span > 0 ? span * 0.1 : Math.max(1, Math.abs(minValue) * 0.1, Math.abs(maxValue) * 0.1);
-      cfg.options.scales.y.min = minValue - padding;
-      cfg.options.scales.y.max = maxValue + padding;
+      cfg.options.scales[valueAxis].min = minValue - padding;
+      cfg.options.scales[valueAxis].max = maxValue + padding;
     }
   }
 
-  window.mainChart = new Chart(ctx, cfg);
+  try {
+    window.mainChart = new Chart(ctx, cfg);
+  } catch (err) {
+    console.error('Chart render failed:', err);
+    window.notify?.(`Chart failed to render: ${err.message}`, 'error');
+    chartContainer.classList.add('empty');
+    window.mainChart = null;
+  }
 }
 
 
@@ -927,44 +1026,51 @@ function addToChartCore() {
         borderWidth: 1
       };
     } else if (chartType === 'qqplot') {
-      const seriesColor = ds.color || getBenchmarkColor(idx);
-      const qq = buildQQPlot(vals);
-      const mean = jStat.mean(vals);
-      const std = jStat.stdev(vals);
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (let i = 0; i < qq.length; i++) {
-        const z = qq[i].x;
-        if (z < minZ) minZ = z;
-        if (z > maxZ) maxZ = z;
+      const qqResult = buildQQPlot(vals);
+      if (!qqResult) {
+        window.notify?.(`${ds.name}: need at least 2 valid values for a Q-Q plot.`, 'warning');
+        return;
       }
-      const linePts = [
-        { x: minZ, y: mean + std * minZ },
-        { x: maxZ, y: mean + std * maxZ }
-      ];
+
+      const seriesColor = ds.color || getBenchmarkColor(idx);
 
       window.chartDatasets.push({
-        label: `${ds.name} (data)`,
-        data: qq,
+        label: ds.name,
+        type: 'scatter',
+        data: qqResult.points,
         borderColor: seriesColor,
-        backgroundColor: seriesColor,
-        pointRadius: 2,
-        showLine: false
+        backgroundColor: hexToRgba(seriesColor, 0.75),
+        pointRadius: 2.5,
+        pointHitRadius: 6,
+        showLine: false,
+        parsing: false,
+        order: 2,
+        qqRole: 'sample'
       });
 
       cfg = {
-        label: `${ds.name} - ${metric} (Ref Line)`,
-        data: linePts,
-        borderColor: '#f00',
-        backgroundColor: '#f00',
+        label: `${ds.name} (normal ref.)`,
+        type: 'scatter',
+        data: qqResult.refLine,
+        borderColor: hexToRgba(seriesColor, 0.9),
+        backgroundColor: hexToRgba(seriesColor, 0.9),
         pointRadius: 0,
-        borderWidth: 2,
-        showLine: true
+        borderWidth: 1.5,
+        borderDash: [5, 4],
+        showLine: true,
+        parsing: false,
+        order: 1,
+        qqRole: 'reference'
       };
     }
 
     if (cfg) window.chartDatasets.push(cfg);
   });
+
+  if (chartType === 'qqplot' && window.chartDatasets.length === 0) {
+    window.notify?.('Could not build Q-Q plot from the selected data.', 'warning');
+    return;
+  }
 
   renderChart(chartType, { incremental: hadExistingChart });
   updateDatasetOrder();
@@ -980,6 +1086,9 @@ function addToChart() {
     setTimeout(() => {
       try {
         addToChartCore();
+      } catch (err) {
+        console.error('Add to chart failed:', err);
+        window.notify?.(`Failed to add chart: ${err.message}`, 'error');
       } finally {
         setChartBusy(false);
       }
