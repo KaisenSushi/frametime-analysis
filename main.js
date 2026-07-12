@@ -28,14 +28,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // Sidebar navigation
   const navItems = document.querySelectorAll('.nav-item');
   const tabContents = document.querySelectorAll('.tab-content');
+  const sidebarPanels = document.querySelectorAll('.sidebar-panel');
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       navItems.forEach(n => n.classList.remove('active'));
       tabContents.forEach(tc => tc.classList.add('hidden'));
+      sidebarPanels.forEach(sp => sp.classList.add('hidden'));
 
       item.classList.add('active');
-      const target = document.getElementById(item.dataset.tab);
+      const tab = item.dataset.tab;
+      const target = document.getElementById(tab);
+      const sidebar = document.getElementById(tab + 'Sidebar');
       if (target) target.classList.remove('hidden');
+      if (sidebar) sidebar.classList.remove('hidden');
     });
   });
 
