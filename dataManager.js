@@ -73,7 +73,7 @@ const STATS_METRIC_GROUPS = [
     ]
   },
   { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] },
-  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'], hint: 'Derived from frametime. Lower is smoother.' }
+  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'] }
 ];
 
 // global UI flag (default = basic mode)
