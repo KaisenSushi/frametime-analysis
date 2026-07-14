@@ -16,6 +16,9 @@ function clearAllDatasets() {
   if (typeof window.resetStatsPanel === 'function') {
     window.resetStatsPanel();
   }
+  if (typeof window.resetReliabilityPanel === 'function') {
+    window.resetReliabilityPanel();
+  }
 
   refreshDatasetLists();
   console.log("All datasets cleared.");
@@ -459,7 +462,8 @@ function detectAvailableMetrics() {
  */
 function updateMetricDropdowns() {
   const metricSelects = [
-    document.getElementById('metricSelect')
+    document.getElementById('metricSelect'),
+    document.getElementById('reliabilityMetricSelect')
   ];
   const statsMetricGroup = document.getElementById('statMetricsGroup');
   const dsSelect = document.getElementById('datasetSelect');
@@ -564,7 +568,10 @@ function updateMetricDropdowns() {
   metricSelects.forEach(sel => {
     if (!sel) return;
     sel.innerHTML = '';
-    metrics.forEach(m => {
+    const selectMetrics = sel.id === 'reliabilityMetricSelect'
+      ? metrics.filter(m => !FRAMETIME_DERIVED_METRICS.has(m))
+      : metrics;
+    selectMetrics.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m;
       opt.textContent = getMetricDisplayName(m);
@@ -576,11 +583,12 @@ function updateMetricDropdowns() {
   metricSelects.forEach((sel,i) => {
     if (!sel) return;
     const prev = previousValues[i];
-    if (prev && metrics.includes(prev)) {
+    const availableMetrics = Array.from(sel.options).map(option => option.value);
+    if (prev && availableMetrics.includes(prev)) {
       sel.value = prev;
-    } else if (metrics.includes('FrameTime')) {
+    } else if (availableMetrics.includes('FrameTime')) {
       sel.value = 'FrameTime';
-    } else if (metrics.includes('FPS')) {
+    } else if (availableMetrics.includes('FPS')) {
       sel.value = 'FPS';
     }
   });
@@ -593,7 +601,7 @@ function updateMetricDropdowns() {
   // Disable selects if empty
   metricSelects.forEach(sel => {
     if (!sel) return;
-    sel.disabled = metrics.length === 0;
+    sel.disabled = sel.options.length === 0;
   });
 
   if (metrics.length === 0 && selectedIdxs.length > 1) {

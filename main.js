@@ -41,6 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const sidebar = document.getElementById(tab + 'Sidebar');
       if (target) target.classList.remove('hidden');
       if (sidebar) sidebar.classList.remove('hidden');
+      if (tab === 'reliability') {
+        window.renderReliabilityPage?.();
+      }
     });
   });
 
@@ -104,6 +107,11 @@ document.addEventListener('DOMContentLoaded', () => {
   setupStatsSidebarControls();
   setupVizChartTypeControls();
 
+  const updateReliabilityBtn = document.getElementById('updateReliabilityBtn');
+  const reliabilityMetricSelect = document.getElementById('reliabilityMetricSelect');
+  updateReliabilityBtn?.addEventListener('click', () => window.renderReliabilityPage?.());
+  reliabilityMetricSelect?.addEventListener('change', () => window.renderReliabilityPage?.());
+
   // 10. Toggle buttons
   document.querySelectorAll('.toggle-button').forEach(btn => {
     btn.addEventListener('click', () => btn.classList.toggle('active'));
@@ -130,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.updateMetricDropdowns();
     }
     syncColorPickerFromSelection();
+    window.renderReliabilityPage?.();
   });
 
   // 17. Any other initialization logic you need

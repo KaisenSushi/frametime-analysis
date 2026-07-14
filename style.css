@@ -129,7 +129,7 @@ body {
 
 .app-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   padding: 12px 12px 8px;
   flex-shrink: 0;
@@ -252,7 +252,8 @@ body {
 }
 
 .viz-sidebar,
-.stats-sidebar {
+.stats-sidebar,
+.reliability-sidebar {
   display: flex;
   flex-direction: column;
   gap: var(--panel-gap);
@@ -1484,6 +1485,55 @@ button:active { transform: scale(0.98); }
   flex-direction: column;
   min-width: 0;
   flex: 1;
+}
+
+/* Reliability tab */
+.reliability-page {
+  gap: 14px;
+  min-height: calc(100vh - var(--content-padding) * 2);
+}
+
+.reliability-update-btn {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.reliability-chart-panel,
+.reliability-diagnostics {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+.reliability-chart-header {
+  margin-bottom: 12px;
+}
+
+.reliability-chart-header h2,
+.reliability-diagnostics > h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.reliability-chart-header p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.reliability-chart-container {
+  height: 480px;
+}
+
+.reliability-diagnostics > h2 {
+  margin-bottom: 10px;
+}
+
+.reliability-diagnostics .stats-diagnostics-grid {
+  padding: 0;
 }
 
 

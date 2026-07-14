@@ -15,6 +15,7 @@
   <script src="dataManager.js"></script>
   <script src="statsManager.js"></script>
   <script src="chartManager.js"></script>
+  <script src="reliabilityManager.js"></script>
   <script src="main.js"></script>
 </head>
 
@@ -27,6 +28,7 @@
         <nav class="app-tabs" aria-label="Main navigation">
           <button class="nav-item active" data-tab="visualization" type="button">Visualization</button>
           <button class="nav-item" data-tab="statistics" type="button">Statistics</button>
+          <button class="nav-item" data-tab="reliability" type="button">Reliability</button>
         </nav>
 
         <div class="sidebar-panels">
@@ -160,6 +162,15 @@
               <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
             </div>
           </div>
+
+          <div id="reliabilitySidebar" class="sidebar-panel reliability-sidebar hidden">
+            <div class="viz-panel">
+              <div class="viz-panel-head"><span>CDF overlay</span></div>
+              <label class="viz-field" for="reliabilityMetricSelect">Metric</label>
+              <select id="reliabilityMetricSelect" class="viz-select"></select>
+              <button id="updateReliabilityBtn" class="accent-button reliability-update-btn" type="button">Update reliability</button>
+            </div>
+          </div>
         </div>
 
         <div class="sidebar-footer">
@@ -220,12 +231,28 @@
               </div>
             </div>
 
-            <details id="statsDiagnosticsWrap" class="stats-diagnostics hidden">
-              <summary>
-                <span>Reliability / Diagnostics</span>
-              </summary>
-              <div id="statsDiagnosticsContent" class="stats-diagnostics-grid"></div>
-            </details>
+          </div>
+        </section>
+
+        <section id="reliability" class="tab-content reliability-page hidden">
+          <div class="reliability-chart-panel">
+            <div class="reliability-chart-header">
+              <div>
+                <h2>CDF overlay</h2>
+                <p>Overlapping lines = consistent results across runs. Spread-out lines = results vary run to run.</p>
+              </div>
+            </div>
+            <div class="chart-container reliability-chart-container empty" id="reliabilityChartContainer">
+              <canvas id="reliabilityChart"></canvas>
+              <div class="empty-chart-message">
+                <p>Upload datasets to compare reliability</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="reliability-diagnostics">
+            <h2>Dataset diagnostics</h2>
+            <div id="reliabilityDiagnosticsContent" class="stats-diagnostics-grid"></div>
           </div>
         </section>
       </main>

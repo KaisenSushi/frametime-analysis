@@ -573,12 +573,12 @@ function renderFPSGapNote(renderedAvg, displayedAvg) {
 }
 
 const PERCENTILE_SUPPORT_DIAGNOSTICS = [
-  { label: '1%ile', fraction: 0.01, kind: 'cutoff' },
-  { label: '0.1%ile', fraction: 0.001, kind: 'cutoff' },
-  { label: '0.01%ile', fraction: 0.0001, kind: 'cutoff' },
-  { label: '1% Low', fraction: 0.01, kind: 'low' },
-  { label: '0.1% Low', fraction: 0.001, kind: 'low' },
-  { label: '0.01% Low', fraction: 0.0001, kind: 'low' }
+  { label: '1%ile', fraction: 0.01 },
+  { label: '0.1%ile', fraction: 0.001 },
+  { label: '0.01%ile', fraction: 0.0001 },
+  { label: '1% Low', fraction: 0.01 },
+  { label: '0.1% Low', fraction: 0.001 },
+  { label: '0.01% Low', fraction: 0.0001 }
 ];
 
 /**
@@ -684,18 +684,15 @@ function renderPercentileSupport(container, frameCount) {
     const expected = frameCount * fraction;
     const status = getPercentileSupportStatus(expected);
     const row = makeDiagnosticsElement('div', 'stats-support-row');
-    const name = makeDiagnosticsElement('span', 'stats-support-name', label);
-    const count = makeDiagnosticsElement(
-      'span',
-      'stats-support-count',
-      `${formatSupportCount(expected)} frames`
+    row.append(
+      makeDiagnosticsElement('span', 'stats-support-name', label),
+      makeDiagnosticsElement('span', 'stats-support-count', `${formatSupportCount(expected)} frames`),
+      makeDiagnosticsElement(
+        'span',
+        `stats-reliability-badge ${status.className}`,
+        status.label
+      )
     );
-    const badge = makeDiagnosticsElement(
-      'span',
-      `stats-reliability-badge ${status.className}`,
-      status.label
-    );
-    row.append(name, count, badge);
     list.appendChild(row);
   });
 
@@ -802,15 +799,14 @@ function renderConfidenceIntervalDiagnostics(container, frametimes) {
 }
 
 function renderReliabilityDiagnostics(selectedDatasets) {
-  const wrap = document.getElementById('statsDiagnosticsWrap');
-  const content = document.getElementById('statsDiagnosticsContent');
-  if (!wrap || !content) return;
+  const content = document.getElementById('reliabilityDiagnosticsContent');
+  if (!content) return;
 
   content.innerHTML = '';
   selectedDatasets.forEach((dataset, index) => {
     const frametimes = collectFrametimeSeries(dataset);
     const card = makeDiagnosticsElement('article', 'stats-diagnostics-card');
-    card.style.setProperty('--stripe', getDatasetColor(index));
+    card.style.setProperty('--stripe', dataset.color || getDatasetColor(index));
 
     const header = makeDiagnosticsElement('header', 'stats-diagnostics-card-header');
     header.append(
@@ -837,8 +833,6 @@ function renderReliabilityDiagnostics(selectedDatasets) {
 
     content.appendChild(card);
   });
-
-  wrap.classList.toggle('hidden', selectedDatasets.length === 0);
 }
 
 /**
@@ -866,10 +860,6 @@ function resetStatsPanel() {
     if (tbody) tbody.innerHTML = '';
   }
 
-  const diagnosticsWrap = document.getElementById('statsDiagnosticsWrap');
-  const diagnosticsContent = document.getElementById('statsDiagnosticsContent');
-  if (diagnosticsWrap) diagnosticsWrap.classList.add('hidden');
-  if (diagnosticsContent) diagnosticsContent.innerHTML = '';
 }
 
 /**
@@ -929,10 +919,13 @@ function updateStatsTable() {
     let rowIndex = 0;
 
     regularMetrics.forEach(metric => {
-      const datasetStats = selectedDatasets.map(dataset => ({
-        name: dataset.name,
-        stats: calculateStatistics(collectMetricValues(dataset, metric), metric)
-      }));
+      const datasetStats = selectedDatasets.map(dataset => {
+        const values = collectMetricValues(dataset, metric);
+        return {
+          name: dataset.name,
+          stats: calculateStatistics(values, metric)
+        };
+      });
       const isFpsMetric = isFpsLikeMetric(metric);
       const metricLabel = typeof window.getMetricChipLabel === 'function'
         ? window.getMetricChipLabel(metric)
@@ -984,7 +977,6 @@ function updateStatsTable() {
   }
 
   renderAggregateStatsTable(aggregateMetrics, selectedDatasets);
-  renderReliabilityDiagnostics(selectedDatasets);
 }
 
 /**
@@ -1150,6 +1142,7 @@ window.calculateStatistics = calculateStatistics;
 window.calculatePercentile = calculatePercentile;
 window.calculateLagAutocorrelation = calculateLagAutocorrelation;
 window.calculateAutocorrelationCorrectedCI = calculateAutocorrelationCorrectedCI;
+window.renderReliabilityDiagnostics = renderReliabilityDiagnostics;
 window.analyzeStuttering = analyzeStuttering;
 window.analyzeFramePacing = analyzeFramePacing;
 window.updateStatsTable = updateStatsTable;
