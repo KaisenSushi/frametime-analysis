@@ -1491,12 +1491,13 @@ button:active { transform: scale(0.98); }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
+  margin: 12px 0 0;
+  padding: 10px 0 0;
   border-top: 1px solid var(--border);
 }
 
-.stats-export-actions > span {
+.stats-export-actions > span,
+.stats-export-banner > span {
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 600;
@@ -1514,6 +1515,38 @@ button:active { transform: scale(0.98); }
   width: 100%;
   padding: 7px 8px;
   font-size: 11px;
+}
+
+.stats-export-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.stats-export-banner .stats-export-buttons {
+  width: min(360px, 100%);
+}
+
+.empty-stats .stats-export-banner,
+.empty-stats .stats-export-actions {
+  display: none !important;
+}
+
+@media (max-width: 700px) {
+  .stats-export-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stats-export-banner .stats-export-buttons {
+    width: 100%;
+  }
 }
 
 /* Reliability tab */

@@ -108,6 +108,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ?.addEventListener('click', () => window.copyStatsAsMarkdown?.());
   document.getElementById('downloadStatsJsonBtn')
     ?.addEventListener('click', () => window.downloadStatsAsJson?.());
+  document.getElementById('copyStatsMarkdownBtnMain')
+    ?.addEventListener('click', () => window.copyStatsAsMarkdown?.());
+  document.getElementById('downloadStatsJsonBtnMain')
+    ?.addEventListener('click', () => window.downloadStatsAsJson?.());
 
   setupStatsSidebarControls();
   setupVizChartTypeControls();

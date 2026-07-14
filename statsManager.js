@@ -1121,7 +1121,16 @@ function resetStatsPanel() {
 
   latestStatsExportState = null;
   window.latestStatsExportData = null;
-  document.getElementById('statsExportActions')?.classList.add('hidden');
+  setStatsExportVisible(false);
+}
+
+function setStatsExportVisible(visible) {
+  ['statsExportActions', 'statsExportBanner'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+    el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  });
 }
 
 /**
@@ -1157,6 +1166,7 @@ function updateStatsTable() {
   }
 
   statsContent.classList.remove('empty-stats');
+  setStatsExportVisible(true);
 
   const regularMetrics = selectedMetrics.filter(m => !isAggregateMetric(m));
   const aggregateMetrics = selectedMetrics.filter(m => isAggregateMetric(m));
@@ -1274,7 +1284,7 @@ function updateStatsTable() {
     window.notify?.('Statistics calculated, but export prep failed.', 'warning');
   }
 
-  document.getElementById('statsExportActions')?.classList.remove('hidden');
+  setStatsExportVisible(true);
 }
 
 /**

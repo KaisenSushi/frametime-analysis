@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Frame Timing Analyzer</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20260715a" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
@@ -12,11 +12,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js"></script>
 
-  <script src="dataManager.js"></script>
-  <script src="statsManager.js"></script>
-  <script src="chartManager.js"></script>
-  <script src="reliabilityManager.js"></script>
-  <script src="main.js"></script>
+  <script src="dataManager.js?v=20260715a"></script>
+  <script src="statsManager.js?v=20260715a"></script>
+  <script src="chartManager.js?v=20260715a"></script>
+  <script src="reliabilityManager.js?v=20260715a"></script>
+  <script src="main.js?v=20260715a"></script>
 </head>
 
 <body>
@@ -159,14 +159,14 @@
                 <div class="toggle-button active" data-stat="low001">0.01% Low</div>
                 <div class="toggle-button active" data-stat="stdev">STDEV</div>
               </div>
-              <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
-              <div id="statsExportActions" class="stats-export-actions hidden">
+              <div id="statsExportActions" class="stats-export-actions hidden" aria-hidden="true">
                 <span>Export for analysis</span>
                 <div class="stats-export-buttons">
                   <button id="copyStatsMarkdownBtn" class="secondary-button mini" type="button">Copy as Markdown</button>
                   <button id="downloadStatsJsonBtn" class="secondary-button mini" type="button">Download as JSON</button>
                 </div>
               </div>
+              <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
             </div>
           </div>
 
@@ -218,6 +218,14 @@
           <div class="stats-results">
             <div class="empty-stats-message">
               <p>Select datasets and metrics, then click <strong>Calculate statistics</strong></p>
+            </div>
+
+            <div id="statsExportBanner" class="stats-export-banner hidden" aria-hidden="true">
+              <span>Export for analysis</span>
+              <div class="stats-export-buttons">
+                <button id="copyStatsMarkdownBtnMain" class="secondary-button mini" type="button">Copy as Markdown</button>
+                <button id="downloadStatsJsonBtnMain" class="secondary-button mini" type="button">Download as JSON</button>
+              </div>
             </div>
 
             <div class="table-wrap" id="statsMainTableWrap">
