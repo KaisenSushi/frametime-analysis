@@ -911,7 +911,13 @@ function buildStatsJsonExport(state = latestStatsExportState) {
 
   const metricDescriptions = {};
   state.metrics.forEach(metric => {
-    metricDescriptions[getMetricDisplayName(metric)] = getMetricDescription(metric);
+    const metricLabel = typeof window.getMetricDisplayName === 'function'
+      ? window.getMetricDisplayName(metric)
+      : metric;
+    const description = typeof window.getMetricDescription === 'function'
+      ? window.getMetricDescription(metric)
+      : '';
+    metricDescriptions[metricLabel] = description;
   });
 
   const statisticDescriptions = {};
@@ -926,7 +932,9 @@ function buildStatsJsonExport(state = latestStatsExportState) {
     datasets: state.datasets.map(entry => {
       const stats = {};
       state.metrics.forEach(metric => {
-        const metricLabel = getMetricDisplayName(metric);
+        const metricLabel = typeof window.getMetricDisplayName === 'function'
+          ? window.getMetricDisplayName(metric)
+          : metric;
         const metricStats = entry.stats[metric] || {};
         stats[metricLabel] = {};
 
@@ -973,6 +981,9 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
   lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
 
   state.metrics.forEach(metric => {
+    const metricLabel = typeof window.getMetricDisplayName === 'function'
+      ? window.getMetricDisplayName(metric)
+      : metric;
     const cells = state.datasets.map(entry => {
       const metricStats = entry.stats[metric] || {};
       return Object.entries(metricStats).map(([stat, value]) => {
@@ -982,14 +993,19 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
         return `${escapeMarkdown(statLabel)}: ${formatStatValue(metric, stat, value)}`;
       }).join('<br>');
     });
-    lines.push(`| ${escapeMarkdown(getMetricDisplayName(metric))} | ${cells.join(' | ')} |`);
+    lines.push(`| ${escapeMarkdown(metricLabel)} | ${cells.join(' | ')} |`);
   });
 
   const glossary = [];
   state.metrics.forEach(metric => {
-    const description = getMetricDescription(metric);
+    const metricLabel = typeof window.getMetricDisplayName === 'function'
+      ? window.getMetricDisplayName(metric)
+      : metric;
+    const description = typeof window.getMetricDescription === 'function'
+      ? window.getMetricDescription(metric)
+      : '';
     if (description) {
-      glossary.push(`- **${escapeMarkdown(getMetricDisplayName(metric))}:** ${escapeMarkdown(description)}`);
+      glossary.push(`- **${escapeMarkdown(metricLabel)}:** ${escapeMarkdown(description)}`);
     }
   });
   state.selectedStats.forEach(stat => {
@@ -1241,14 +1257,23 @@ function updateStatsTable() {
   }
 
   renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState);
-  exportState.datasets.forEach(entry => {
-    entry.reliabilityDiagnostics = buildExportReliabilityDiagnostics(
-      entry.dataset,
-      selectedStats
-    );
-  });
-  latestStatsExportState = exportState;
-  window.latestStatsExportData = buildStatsJsonExport(exportState);
+
+  try {
+    exportState.datasets.forEach(entry => {
+      entry.reliabilityDiagnostics = buildExportReliabilityDiagnostics(
+        entry.dataset,
+        selectedStats
+      );
+    });
+    latestStatsExportState = exportState;
+    window.latestStatsExportData = buildStatsJsonExport(exportState);
+  } catch (error) {
+    console.error('Failed to prepare statistics export:', error);
+    latestStatsExportState = exportState;
+    window.latestStatsExportData = null;
+    window.notify?.('Statistics calculated, but export prep failed.', 'warning');
+  }
+
   document.getElementById('statsExportActions')?.classList.remove('hidden');
 }
 
