@@ -74,11 +74,40 @@ function calculateRMSSD(values) {
   return Math.sqrt(sumSqDiff / (n - 1));
 }
 
+/**
+ * Distribution-shape metrics based on the existing mean, median, and stdev
+ * calculations used by the Statistics panel.
+ */
+function calculateDistributionShape(values) {
+  const series = (values || []).filter(v => Number.isFinite(v) && v > 0);
+  if (series.length < 2) {
+    return { skewness: NaN, kurtosis: NaN, nonparametricSkew: NaN };
+  }
+
+  const { avg: mean, median, stdev } = calculateStatistics(series, 'FrameTime');
+  if (!Number.isFinite(stdev) || stdev === 0) {
+    return { skewness: NaN, kurtosis: NaN, nonparametricSkew: NaN };
+  }
+
+  const n = series.length;
+  const thirdMoment = series.reduce((sum, value) => sum + (value - mean) ** 3, 0) / n;
+  const fourthMoment = series.reduce((sum, value) => sum + (value - mean) ** 4, 0) / n;
+
+  return {
+    skewness: thirdMoment / (stdev ** 3),
+    kurtosis: fourthMoment / (stdev ** 4) - 3,
+    nonparametricSkew: (mean - median) / stdev
+  };
+}
+
 /** Metrics computed once over the full frametime series (not per frame). */
 const AGGREGATE_FRAMETIME_METRICS = new Set([
   'Stepwise_Relative_SD',
   'Coefficient_of_Variation',
-  'RMSSD'
+  'RMSSD',
+  'Skewness',
+  'Kurtosis',
+  'Nonparametric_Skew'
 ]);
 
 function calculateAggregateMetric(values, metricName) {
@@ -86,6 +115,9 @@ function calculateAggregateMetric(values, metricName) {
     case 'Stepwise_Relative_SD': return calculateStepwiseRelativeSD(values);
     case 'Coefficient_of_Variation': return calculateCoefficientOfVariation(values);
     case 'RMSSD': return calculateRMSSD(values);
+    case 'Skewness': return calculateDistributionShape(values).skewness;
+    case 'Kurtosis': return calculateDistributionShape(values).kurtosis;
+    case 'Nonparametric_Skew': return calculateDistributionShape(values).nonparametricSkew;
     default: return NaN;
   }
 }
@@ -167,7 +199,13 @@ function updateStatsAverageLabel() {
 function formatStatValue(metric, stat, value) {
   if (!Number.isFinite(value)) return 'N/A';
   if (metric === 'RMSSD') return value.toFixed(2);
-  if (metric === 'Stepwise_Relative_SD' || metric === 'Coefficient_of_Variation') return value.toFixed(4);
+  if (
+    metric === 'Stepwise_Relative_SD' ||
+    metric === 'Coefficient_of_Variation' ||
+    metric === 'Skewness' ||
+    metric === 'Kurtosis' ||
+    metric === 'Nonparametric_Skew'
+  ) return value.toFixed(4);
   if (isFpsLikeMetric(metric)) return value.toFixed(1);
   if (stat === 'stdev') return value.toFixed(3);
   return value.toFixed(2);
@@ -248,12 +286,6 @@ function getMetricValue(row, metric) {
   return (matchingKey && typeof row[matchingKey] === 'number') ? row[matchingKey] : null;
 }
 
-function percentileNearestRank(sortedAsc, p) {
-  if (!sortedAsc.length) return NaN;
-  const rank = Math.ceil((p / 100) * sortedAsc.length) - 1;   // 0‑based
-  return sortedAsc[Math.max(0, Math.min(rank, sortedAsc.length - 1))];
-}
-
 function calculateStatistics(arr, metricName = '') {
   if (!arr.length) {
     return {
@@ -299,9 +331,9 @@ function calculateStatistics(arr, metricName = '') {
       : Math.sqrt(sorted.reduce((s, v) => s + (v - avg) ** 2, 0) / (n - 1));
 
   /* -------- percentiles (single‑frame cut‑off) --------------------- */
-  const p1   = percentileNearestRank(sorted,  isFpsMetric ? 1     : 99);
-  const p01  = percentileNearestRank(sorted,  isFpsMetric ? 0.1   : 99.9);
-  const p001 = percentileNearestRank(sorted,  isFpsMetric ? 0.01  : 99.99);
+  const p1   = calculatePercentile(sorted,  isFpsMetric ? 1     : 99);
+  const p01  = calculatePercentile(sorted,  isFpsMetric ? 0.1   : 99.9);
+  const p001 = calculatePercentile(sorted,  isFpsMetric ? 0.01  : 99.99);
 
   /* -------- “X % Low” (average of worst frames) -------------------- */
   const c1   = Math.max(1, Math.ceil(n * 0.01));     // 1 %
@@ -1138,6 +1170,7 @@ window.getMetricValue = getMetricValue;
 window.calculateStepwiseRelativeSD = calculateStepwiseRelativeSD;
 window.calculateCoefficientOfVariation = calculateCoefficientOfVariation;
 window.calculateRMSSD = calculateRMSSD;
+window.calculateDistributionShape = calculateDistributionShape;
 window.calculateStatistics = calculateStatistics;
 window.calculatePercentile = calculatePercentile;
 window.calculateLagAutocorrelation = calculateLagAutocorrelation;

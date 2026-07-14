@@ -47,13 +47,25 @@ const DERIVED_METRICS = [
   'DisplayedFPS',
   'Stepwise_Relative_SD',
   'Coefficient_of_Variation',
-  'RMSSD'
+  'RMSSD',
+  'Skewness',
+  'Kurtosis',
+  'Nonparametric_Skew'
 ];
 
 const FRAMETIME_DERIVED_METRICS = new Set([
   'Stepwise_Relative_SD',
   'Coefficient_of_Variation',
-  'RMSSD'
+  'RMSSD',
+  'Skewness',
+  'Kurtosis',
+  'Nonparametric_Skew'
+]);
+
+const ADVANCED_ONLY_METRICS = new Set([
+  'Skewness',
+  'Kurtosis',
+  'Nonparametric_Skew'
 ]);
 
 const CORE_METRICS = [
@@ -76,7 +88,8 @@ const STATS_METRIC_GROUPS = [
     ]
   },
   { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] },
-  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'] }
+  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'] },
+  { label: 'Distribution shape', metrics: ['Skewness', 'Kurtosis', 'Nonparametric_Skew'] }
 ];
 
 // global UI flag (default = basic mode)
@@ -549,6 +562,7 @@ function updateMetricDropdowns() {
 
   // Ensure derived metrics are included when advanced
   DERIVED_METRICS.forEach(dm => {
+    if (!window.showAdvancedMetrics && ADVANCED_ONLY_METRICS.has(dm)) return;
     const available = (window.allDatasets || []).some(ds =>
       ds.rows?.length && (
         FRAMETIME_DERIVED_METRICS.has(dm)
@@ -621,7 +635,10 @@ const STATS_CHIP_LABELS = {
   'MsUntilDisplayed': 'MsUntilDisplayed',
   'Stepwise_Relative_SD': 'Stepwise Rel. SD',
   'Coefficient_of_Variation': 'CV (σ/μ)',
-  'RMSSD': 'RMSSD'
+  'RMSSD': 'RMSSD',
+  'Skewness': 'Skewness',
+  'Kurtosis': 'Kurtosis',
+  'Nonparametric_Skew': 'Nonparametric Skew'
 };
 
 function getMetricChipLabel(metric) {
@@ -715,6 +732,9 @@ function getMetricDisplayName(metric) {
     'Stepwise_Relative_SD': 'Stepwise Relative SD',
     'Coefficient_of_Variation': 'Coefficient of Variation (σ/μ)',
     'RMSSD': 'RMSSD (ms)',
+    'Skewness': 'Skewness',
+    'Kurtosis': 'Excess Kurtosis',
+    'Nonparametric_Skew': 'Nonparametric Skew',
     'MsBetweenPresents': 'MsBetweenPresents (ms)',
     'MsBetweenDisplayChange': 'MsBetweenDisplayChange (ms)',
     'MsInPresentAPI': 'Time in Present API (ms)',
@@ -748,7 +768,10 @@ function getMetricDescription(metric) {
     'MsUntilDisplayed': 'Time from CPU frame completion to display output.',
     'Stepwise_Relative_SD': 'Frame-to-frame relative variability. Lower is smoother.',
     'Coefficient_of_Variation': 'Stdev divided by mean of frametimes. Lower is more consistent.',
-    'RMSSD': 'Root mean square of successive frametime differences (ms). Lower is smoother.'
+    'RMSSD': 'Root mean square of successive frametime differences (ms). Lower is smoother.',
+    'Skewness': 'Positive means a slow/spiky tail, negative means a fast-frame tail, and near zero is symmetric.',
+    'Kurtosis': 'Positive means more extreme outliers, while negative means fewer and milder outliers than normal.',
+    'Nonparametric_Skew': 'Robust skew with the same sign meaning as skewness, but less affected by single extreme spikes.'
   };
   return descriptions[metric] || '';
 }
