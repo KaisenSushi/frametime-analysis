@@ -321,19 +321,27 @@ function buildLineScatterPoints(rows, metric, useValueX) {
 /**
  * Builds a histogram from an array of numeric data.
  * @param {number[]} data
+ * @param {{ minVal?: number, maxVal?: number, binCount?: number, binWidth?: number }} [binEdges]
+ *        Optional shared bin edges for multi-dataset overlays. When omitted, edges are
+ *        derived from this dataset alone (single-dataset / backward-compatible path).
  * @returns {{labels: string[], counts: number[]}}
  */
-function buildHistogram(data) {
+function buildHistogram(data, binEdges = {}) {
   if (!data.length) {
     return { labels: [], counts: [] };
   }
 
-  let minVal = Infinity;
-  let maxVal = -Infinity;
-  for (let i = 0; i < data.length; i++) {
-    const v = data[i];
-    if (v < minVal) minVal = v;
-    if (v > maxVal) maxVal = v;
+  let minVal = binEdges.minVal;
+  let maxVal = binEdges.maxVal;
+
+  if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) {
+    minVal = Infinity;
+    maxVal = -Infinity;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      if (v < minVal) minVal = v;
+      if (v > maxVal) maxVal = v;
+    }
   }
 
   // Handle case where all values are identical
@@ -341,8 +349,16 @@ function buildHistogram(data) {
     return { labels: [minVal.toString()], counts: [data.length] };
   }
 
-  const binCount = Math.max(1, Math.min(50, Math.ceil(Math.sqrt(data.length))));
-  const binWidth = (maxVal - minVal) / binCount;
+  let binCount = binEdges.binCount;
+  if (!Number.isFinite(binCount) || binCount < 1) {
+    binCount = Math.max(1, Math.min(50, Math.ceil(Math.sqrt(data.length))));
+  }
+
+  let binWidth = binEdges.binWidth;
+  if (!Number.isFinite(binWidth) || binWidth <= 0) {
+    binWidth = (maxVal - minVal) / binCount;
+  }
+
   const counts = Array(binCount).fill(0);
 
   for (let i = 0; i < data.length; i++) {
@@ -358,6 +374,38 @@ function buildHistogram(data) {
     labels.push(`${rangeStart}-${rangeEnd}`);
   }
   return { labels, counts };
+}
+
+/**
+ * Shared histogram edges so overlaid datasets land in identical x-axis buckets.
+ * binCount uses the largest dataset's n (sqrt rule) so the densest series is not
+ * under-binned; smaller series still share those same edges for direct comparison.
+ * @param {number[][]} seriesList
+ * @returns {{ minVal: number, maxVal: number, binCount: number, binWidth: number }|null}
+ */
+function computeSharedHistogramEdges(seriesList) {
+  const series = (seriesList || []).filter(s => Array.isArray(s) && s.length);
+  if (series.length < 2) return null;
+
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+  let maxN = 0;
+
+  for (let s = 0; s < series.length; s++) {
+    const data = series[s];
+    maxN = Math.max(maxN, data.length);
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      if (v < minVal) minVal = v;
+      if (v > maxVal) maxVal = v;
+    }
+  }
+
+  if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) return null;
+
+  const binCount = Math.max(1, Math.min(50, Math.ceil(Math.sqrt(maxN))));
+  const binWidth = minVal === maxVal ? 0 : (maxVal - minVal) / binCount;
+  return { minVal, maxVal, binCount, binWidth };
 }
 
 /**
@@ -434,7 +482,7 @@ function buildQQPlot(data) {
   const sample = subsampleSorted(sorted, MAX_QQ_POINTS);
   const n = sample.length;
   const mean = jStat.mean(sample);
-  const std = jStat.stdev(sample);
+  const std = jStat.stdev(sample, true);
 
   const points = [];
   for (let i = 0; i < n; i++) {
@@ -981,6 +1029,19 @@ function addToChartCore() {
   }
 
   // ---- ALL OTHER CHART TYPES ----
+  // For multi-dataset histograms, share one bin grid so bars are comparable.
+  let histogramSharedEdges = null;
+  if (chartType === 'histogram') {
+    const seriesForBins = [];
+    indices.forEach(idx => {
+      const ds = window.allDatasets[idx];
+      if (!ds?.rows?.length) return;
+      const vals = getMetricSeries(ds, metric);
+      if (vals.length) seriesForBins.push(vals);
+    });
+    histogramSharedEdges = computeSharedHistogramEdges(seriesForBins);
+  }
+
   indices.forEach(idx => {
     const ds = window.allDatasets[idx];
     if (!ds?.rows?.length) return;
@@ -1015,7 +1076,9 @@ function addToChartCore() {
         sourceMetric: metric
       };
     } else if (chartType === 'histogram') {
-      const bins = buildHistogram(vals);
+      const bins = histogramSharedEdges
+        ? buildHistogram(vals, histogramSharedEdges)
+        : buildHistogram(vals);
       const seriesColor = ds.color || getBenchmarkColor(idx);
       cfg = {
         label: ds.name,

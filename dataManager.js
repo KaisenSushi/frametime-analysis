@@ -278,6 +278,74 @@ function parseCSVLine(line, delimiter) {
  * Handles file selection event for CSV/TXT uploads,
  * reads each file, parses the data, and stores it in allDatasets.
  */
+function makeUniqueDatasetName(originalName) {
+  const dotIndex = originalName.lastIndexOf('.');
+  const hasExtension = dotIndex > 0;
+  const base = hasExtension ? originalName.slice(0, dotIndex) : originalName;
+  const extension = hasExtension ? originalName.slice(dotIndex) : '';
+  const existingNames = new Set((window.allDatasets || []).map(dataset => dataset.name));
+
+  let suffix = 2;
+  let candidate = `${base} (${suffix})${extension}`;
+  while (existingNames.has(candidate)) {
+    suffix++;
+    candidate = `${base} (${suffix})${extension}`;
+  }
+  return candidate;
+}
+
+function resolveDuplicateDataset(fileName) {
+  const existingIndex = (window.allDatasets || [])
+    .findIndex(dataset => dataset.name === fileName);
+  if (existingIndex === -1) {
+    return { action: 'add', name: fileName, existingIndex: -1 };
+  }
+
+  if (typeof window.prompt !== 'function') {
+    return {
+      action: 'rename',
+      name: makeUniqueDatasetName(fileName),
+      existingIndex
+    };
+  }
+
+  let choice;
+  try {
+    choice = window.prompt(
+      `"${fileName}" is already loaded.\n\nEnter R to replace it, K to keep both with a new name, or C to cancel this file.`,
+      'K'
+    );
+  } catch (error) {
+    return {
+      action: 'rename',
+      name: makeUniqueDatasetName(fileName),
+      existingIndex
+    };
+  }
+
+  if (choice === null) {
+    return { action: 'cancel', name: fileName, existingIndex };
+  }
+  if (typeof choice !== 'string') {
+    return {
+      action: 'rename',
+      name: makeUniqueDatasetName(fileName),
+      existingIndex
+    };
+  }
+  if (choice.trim().toLowerCase() === 'c') {
+    return { action: 'cancel', name: fileName, existingIndex };
+  }
+  if (choice.trim().toLowerCase() === 'r') {
+    return { action: 'replace', name: fileName, existingIndex };
+  }
+  return {
+    action: 'rename',
+    name: makeUniqueDatasetName(fileName),
+    existingIndex
+  };
+}
+
 function handleFileUpload(e) {
   const files = e.target.files;
   if (!files.length) return;
@@ -287,15 +355,28 @@ function handleFileUpload(e) {
   let processedCount = 0;
   let successCount = 0;
   let errorCount = 0;
+  let renamedCount = 0;
+  let replacedCount = 0;
+  let skippedCount = 0;
 
   function finishOneFile() {
     processedCount++;
     if (processedCount !== totalFiles) return;
 
+    if (replacedCount > 0) {
+      window.clearChart?.();
+      window.resetStatsPanel?.();
+    }
     refreshDatasetLists();
-    const summary = `Loaded ${successCount} file(s). ${errorCount > 0 ? `${errorCount} file(s) had errors.` : ''}`.trim();
+
+    const summaryParts = [`Loaded ${successCount} file(s).`];
+    if (renamedCount > 0) summaryParts.push(`Renamed ${renamedCount} duplicate(s).`);
+    if (replacedCount > 0) summaryParts.push(`Replaced ${replacedCount} existing dataset(s).`);
+    if (skippedCount > 0) summaryParts.push(`Skipped ${skippedCount} duplicate(s).`);
+    if (errorCount > 0) summaryParts.push(`${errorCount} file(s) had errors.`);
+    const summary = summaryParts.join(' ');
     if (typeof window.notify === 'function') {
-      window.notify(summary, errorCount > 0 ? 'warning' : 'success');
+      window.notify(summary, errorCount > 0 || skippedCount > 0 ? 'warning' : 'success');
     } else {
       console.log(summary);
     }
@@ -328,11 +409,27 @@ function handleFileUpload(e) {
           return;
         }
 
+        const duplicate = resolveDuplicateDataset(file.name);
+        if (duplicate.action === 'cancel') {
+          skippedCount++;
+          finishOneFile();
+          return;
+        }
+
         const datasetObj = {
-          name: file.name,
+          name: duplicate.name,
           rows: parsedRows
         };
-        window.allDatasets.push(datasetObj);
+
+        if (duplicate.action === 'replace') {
+          const existing = window.allDatasets[duplicate.existingIndex];
+          if (existing?.color) datasetObj.color = existing.color;
+          window.allDatasets[duplicate.existingIndex] = datasetObj;
+          replacedCount++;
+        } else {
+          window.allDatasets.push(datasetObj);
+          if (duplicate.action === 'rename') renamedCount++;
+        }
         successCount++;
         finishOneFile();
       } catch (error) {
