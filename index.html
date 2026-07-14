@@ -146,8 +146,9 @@
               <div class="viz-panel-head"><span>Statistics</span></div>
               <div class="toggle-group compact" id="statsTypeGroup">
                 <div class="toggle-button active" data-stat="max">Max</div>
-                <div class="toggle-button active" data-stat="avg">Avg</div>
+                <div class="toggle-button active stats-avg-toggle" data-stat="avg"><span class="stats-avg-main">Avg</span><span class="stats-avg-sub">Harmonic / Arithmetic</span></div>
                 <div class="toggle-button active" data-stat="min">Min</div>
+                <div class="toggle-button" data-stat="median">Median</div>
                 <div class="toggle-button" data-stat="p1">1%ile</div>
                 <div class="toggle-button" data-stat="p01">0.1%ile</div>
                 <div class="toggle-button" data-stat="p001">0.01%ile</div>
@@ -218,6 +219,13 @@
                 </table>
               </div>
             </div>
+
+            <details id="statsDiagnosticsWrap" class="stats-diagnostics hidden">
+              <summary>
+                <span>Reliability / Diagnostics</span>
+              </summary>
+              <div id="statsDiagnosticsContent" class="stats-diagnostics-grid"></div>
+            </details>
           </div>
         </section>
       </main>

@@ -168,7 +168,7 @@ const MAX_DISTRIBUTION_POINTS = 6000;
 const MAX_QQ_POINTS = 3000;
 
 /**
- * Largest-Triangle-Three-Buckets downsampling — preserves visual shape of line data.
+ * Largest-Triangle-Three-Buckets downsampling - preserves visual shape of line data.
  * @param {{x:number,y:number}[]} points
  * @param {number} threshold
  */
@@ -250,7 +250,7 @@ function getDatasetTimestampKey(dataset) {
   return null;
 }
 
-/** Cached numeric series for a metric — avoids re-reading every row on each add. */
+/** Cached numeric series for a metric - avoids re-reading every row on each add. */
 function getMetricSeries(dataset, metric) {
   if (!dataset._seriesCache) dataset._seriesCache = Object.create(null);
   if (dataset._seriesCache[metric]) return dataset._seriesCache[metric];
@@ -313,7 +313,7 @@ function getLineScatterPoints(dataset, metric, useValueX) {
 }
 
 function buildLineScatterPoints(rows, metric, useValueX) {
-  // Legacy entry point — prefer getLineScatterPoints when dataset object is available.
+  // Legacy entry point - prefer getLineScatterPoints when dataset object is available.
   const dataset = { rows, _pointCache: null, _timestampKey: undefined };
   return getLineScatterPoints(dataset, metric, useValueX).points;
 }

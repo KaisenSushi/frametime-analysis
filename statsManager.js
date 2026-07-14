@@ -15,7 +15,7 @@ function findNumericKey(row, ...candidates) {
 }
 
 /**
- * Stepwise Relative SD — measures frame-to-frame relative variability.
+ * Stepwise Relative SD - measures frame-to-frame relative variability.
  * Stepwise_Relative_SD = sqrt((1/(n-1)) * sum_{t=2}^{n} [(F_t - F_{t-1})/F_{t-1}]^2)
  * @param {number[]} values - Frametime or latency series (ms)
  * @returns {number}
@@ -35,7 +35,7 @@ function calculateStepwiseRelativeSD(values) {
 }
 
 /**
- * Coefficient of Variation — relative variability of the frametime series.
+ * Coefficient of Variation - relative variability of the frametime series.
  * CV = σ / μ (sample stdev divided by mean).
  * @param {number[]} values - Frametime series (ms)
  * @returns {number}
@@ -56,7 +56,7 @@ function calculateCoefficientOfVariation(values) {
 }
 
 /**
- * RMSSD — root mean square of successive frametime differences.
+ * RMSSD - root mean square of successive frametime differences.
  * RMSSD = sqrt((1 / (n - 1)) * Σ_{t=2}^{n} (F_t - F_{t-1})²)
  * @param {number[]} values - Frametime series (ms)
  * @returns {number}
@@ -110,6 +110,53 @@ function isFpsLikeMetric(metric) {
          metric.toLowerCase().includes('fps');
 }
 
+function getAverageMeanKind(metrics = []) {
+  const selected = metrics.filter(Boolean);
+  if (!selected.length) return 'none';
+
+  const hasFps = selected.some(isFpsLikeMetric);
+  const hasNonFps = selected.some(metric => !isFpsLikeMetric(metric));
+
+  if (hasFps && !hasNonFps) return 'harmonic';
+  if (!hasFps && hasNonFps) return 'arithmetic';
+  return 'mixed';
+}
+
+function getAverageDisplayLabel(metrics = []) {
+  switch (getAverageMeanKind(metrics)) {
+    case 'harmonic': return 'Avg (Harmonic Mean)';
+    case 'arithmetic': return 'Avg (Arithmetic Mean)';
+    case 'mixed': return 'Avg (Harmonic / Arithmetic Mean)';
+    default: return 'Avg';
+  }
+}
+
+function getAverageMeanSubLabel(metrics = []) {
+  switch (getAverageMeanKind(metrics)) {
+    case 'harmonic': return 'Harmonic';
+    case 'arithmetic': return 'Arithmetic';
+    case 'mixed': return 'Harmonic / Arithmetic';
+    default: return 'Mean';
+  }
+}
+
+function updateStatsAverageLabel() {
+  const avgButton = document.querySelector('#statsTypeGroup [data-stat="avg"]');
+  if (!avgButton) return;
+
+  const selectedMetrics = Array.from(
+    document.querySelectorAll('#statMetricsGroup .toggle-button.active')
+  ).map(button => button.dataset.metric);
+
+  const subLabel = avgButton.querySelector('.stats-avg-sub');
+  if (subLabel) subLabel.textContent = getAverageMeanSubLabel(selectedMetrics);
+
+  const label = getAverageDisplayLabel(selectedMetrics);
+  avgButton.title = selectedMetrics.length
+    ? `${label}; the formula is selected per metric.`
+    : 'Select a metric to see which mean is used.';
+}
+
 /**
  * Formats a stat value for display, choosing a sensible precision per metric.
  * @param {string} metric
@@ -155,7 +202,7 @@ function getMetricValue(row, metric) {
     return (ms && ms > 0) ? 1000.0 / ms : null;
   }
 
-  // GPU busy time — critical for input lag even when FPS looks fine
+  // GPU busy time - critical for input lag even when FPS looks fine
   if (metric === 'MsGPUBusy') {
     return findNumericKey(row, 'MsGPUBusy', 'GPUBusy', 'MsGpuBusy');
   }
@@ -165,7 +212,7 @@ function getMetricValue(row, metric) {
     return findNumericKey(row, 'MsUntilDisplayed', 'MsUntilDisplayComplete');
   }
 
-  // Aggregate-only metrics — not meaningful per row
+  // Aggregate-only metrics - not meaningful per row
   if (AGGREGATE_FRAMETIME_METRICS.has(metric)) {
     return null;
   }
@@ -210,7 +257,7 @@ function percentileNearestRank(sortedAsc, p) {
 function calculateStatistics(arr, metricName = '') {
   if (!arr.length) {
     return {
-      max: NaN, min: NaN, avg: NaN, stdev: NaN,
+      max: NaN, min: NaN, avg: NaN, median: NaN, stdev: NaN,
       p1: NaN, p01: NaN, p001: NaN,
       low1: NaN, low01: NaN, low001: NaN
     };
@@ -220,7 +267,7 @@ function calculateStatistics(arr, metricName = '') {
   if (isAggregateMetric(metricName)) {
     const aggregate = calculateAggregateMetric(arr, metricName);
     return {
-      max: aggregate, min: aggregate, avg: aggregate, stdev: 0,
+      max: aggregate, min: aggregate, avg: aggregate, median: aggregate, stdev: 0,
       p1: aggregate, p01: aggregate, p001: aggregate,
       low1: aggregate, low01: aggregate, low001: aggregate
     };
@@ -232,6 +279,7 @@ function calculateStatistics(arr, metricName = '') {
   const maxVal = sorted[n - 1];
   const minVal = sorted[0];
   const sum    = sorted.reduce((a, b) => a + b, 0);
+  const median = calculatePercentile(sorted, 50);
 
   /* -------- determine FPS vs Frame‑time ---------------------------- */
   let isFpsMetric =
@@ -280,6 +328,7 @@ function calculateStatistics(arr, metricName = '') {
     max: maxVal,
     min: minVal,
     avg,
+    median,
     stdev,
     p1,  p01,  p001,
     low1, low01, low001
@@ -523,6 +572,275 @@ function renderFPSGapNote(renderedAvg, displayedAvg) {
   return `<div class="stats-gap-note ${cls}">${text}</div>`;
 }
 
+const PERCENTILE_SUPPORT_DIAGNOSTICS = [
+  { label: '1%ile', fraction: 0.01, kind: 'cutoff' },
+  { label: '0.1%ile', fraction: 0.001, kind: 'cutoff' },
+  { label: '0.01%ile', fraction: 0.0001, kind: 'cutoff' },
+  { label: '1% Low', fraction: 0.01, kind: 'low' },
+  { label: '0.1% Low', fraction: 0.001, kind: 'low' },
+  { label: '0.01% Low', fraction: 0.0001, kind: 'low' }
+];
+
+/**
+ * Standard lag-k sample autocorrelation using the full-series centered sum
+ * of squares as the denominator.
+ */
+function calculateLagAutocorrelation(values, lag = 1) {
+  const series = (values || []).filter(Number.isFinite);
+  const n = series.length;
+  if (lag < 1 || n <= lag) return NaN;
+
+  const mean = series.reduce((sum, value) => sum + value, 0) / n;
+  let numerator = 0;
+  let denominator = 0;
+
+  for (let i = 0; i < n; i++) {
+    const centered = series[i] - mean;
+    denominator += centered * centered;
+    if (i + lag < n) {
+      numerator += centered * (series[i + lag] - mean);
+    }
+  }
+
+  return denominator > 0 ? numerator / denominator : NaN;
+}
+
+/**
+ * Computes the usual normal-approximation CI and a conservative AR(1)
+ * effective-sample-size correction based on lag-1 autocorrelation.
+ */
+function calculateAutocorrelationCorrectedCI(values) {
+  const series = (values || []).filter(Number.isFinite);
+  const n = series.length;
+  if (n < 2) return null;
+
+  const mean = series.reduce((sum, value) => sum + value, 0) / n;
+  const variance = series.reduce((sum, value) => {
+    const diff = value - mean;
+    return sum + diff * diff;
+  }, 0) / (n - 1);
+  const stdev = Math.sqrt(variance);
+  const r1 = calculateLagAutocorrelation(series, 1);
+
+  // Avoid a singular denominator at r1 = -1 while retaining the requested AR(1) formula.
+  const boundedR1 = Number.isFinite(r1) ? Math.max(-0.99, Math.min(0.99, r1)) : 0;
+  const rawEffectiveN = n * (1 - boundedR1) / (1 + boundedR1);
+  // Preserve the requested AR(1) correction. Negative correlation can yield
+  // n_eff > n; only clamp the lower bound to keep the interval finite.
+  const effectiveN = Math.max(1, rawEffectiveN);
+  const z95 = 1.96;
+  const naiveMargin = z95 * stdev / Math.sqrt(n);
+  const correctedMargin = z95 * stdev / Math.sqrt(effectiveN);
+
+  return {
+    n,
+    mean,
+    stdev,
+    r1,
+    effectiveN,
+    naive: [mean - naiveMargin, mean + naiveMargin],
+    corrected: [mean - correctedMargin, mean + correctedMargin]
+  };
+}
+
+function getPercentileSupportStatus(expectedTailFrames) {
+  if (expectedTailFrames >= 50) {
+    return { label: 'Reliable', className: 'reliable' };
+  }
+  if (expectedTailFrames >= 30) {
+    return { label: 'Low confidence', className: 'low-confidence' };
+  }
+  return { label: 'Insufficient', className: 'insufficient' };
+}
+
+function formatSupportCount(value) {
+  if (value >= 10) return value.toFixed(1);
+  if (value >= 1) return value.toFixed(2);
+  return value.toFixed(3);
+}
+
+function interpretAutocorrelation(r1) {
+  if (!Number.isFinite(r1)) return 'No variance in the series.';
+  if (r1 >= 0.5) return 'Strong clustering: slow frames follow slow frames.';
+  if (r1 >= 0.25) return 'Moderate clustering.';
+  if (r1 >= 0.1) return 'Mild clustering.';
+  if (r1 <= -0.1) return 'Frames tend to alternate fast/slow.';
+  return 'Frames behave roughly independently.';
+}
+
+function makeDiagnosticsElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+function renderPercentileSupport(container, frameCount) {
+  const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
+  section.appendChild(makeDiagnosticsElement('h4', '', 'Percentile sample support'));
+
+  const list = makeDiagnosticsElement('div', 'stats-support-list');
+  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ label, fraction }) => {
+    const expected = frameCount * fraction;
+    const status = getPercentileSupportStatus(expected);
+    const row = makeDiagnosticsElement('div', 'stats-support-row');
+    const name = makeDiagnosticsElement('span', 'stats-support-name', label);
+    const count = makeDiagnosticsElement(
+      'span',
+      'stats-support-count',
+      `${formatSupportCount(expected)} frames`
+    );
+    const badge = makeDiagnosticsElement(
+      'span',
+      `stats-reliability-badge ${status.className}`,
+      status.label
+    );
+    row.append(name, count, badge);
+    list.appendChild(row);
+  });
+
+  section.appendChild(list);
+  container.appendChild(section);
+}
+
+function renderAutocorrelationDiagnostics(container, frametimes) {
+  const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
+  section.appendChild(makeDiagnosticsElement('h4', '', 'Frametime autocorrelation'));
+
+  const acfValues = [1, 2, 3].map(lag => ({
+    lag,
+    value: calculateLagAutocorrelation(frametimes, lag)
+  }));
+  const r1 = acfValues[0].value;
+  const valueText = Number.isFinite(r1) ? r1.toFixed(3) : 'N/A';
+  section.appendChild(makeDiagnosticsElement(
+    'div',
+    'stats-diagnostic-primary',
+    `Autocorrelation (lag-1): ${valueText}`
+  ));
+  section.appendChild(makeDiagnosticsElement(
+    'p',
+    'stats-diagnostic-explanation',
+    interpretAutocorrelation(r1)
+  ));
+
+  const acf = makeDiagnosticsElement('div', 'stats-acf');
+  acfValues.forEach(({ lag, value }) => {
+    const row = makeDiagnosticsElement('div', 'stats-acf-row');
+    row.appendChild(makeDiagnosticsElement('span', 'stats-acf-label', `Lag ${lag}`));
+
+    const track = makeDiagnosticsElement('div', 'stats-acf-track');
+    track.appendChild(makeDiagnosticsElement('span', 'stats-acf-center'));
+    if (Number.isFinite(value)) {
+      const bar = makeDiagnosticsElement(
+        'span',
+        `stats-acf-bar ${value >= 0 ? 'positive' : 'negative'}`
+      );
+      bar.style.width = `${Math.min(50, Math.abs(value) * 50)}%`;
+      track.appendChild(bar);
+    }
+    row.appendChild(track);
+    row.appendChild(makeDiagnosticsElement(
+      'span',
+      'stats-acf-value',
+      Number.isFinite(value) ? value.toFixed(3) : 'N/A'
+    ));
+    acf.appendChild(row);
+  });
+
+  section.appendChild(acf);
+  container.appendChild(section);
+}
+
+function formatFrametimeInterval(interval) {
+  return `[${interval[0].toFixed(3)}, ${interval[1].toFixed(3)}] ms`;
+}
+
+function renderConfidenceIntervalDiagnostics(container, frametimes) {
+  const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
+  section.appendChild(makeDiagnosticsElement('h4', '', 'Mean confidence interval'));
+
+  const result = calculateAutocorrelationCorrectedCI(frametimes);
+  if (!result) {
+    section.appendChild(makeDiagnosticsElement(
+      'p',
+      'stats-diagnostic-explanation',
+      'Need at least two frames.'
+    ));
+    container.appendChild(section);
+    return;
+  }
+
+  section.appendChild(makeDiagnosticsElement(
+    'div',
+    'stats-diagnostic-primary',
+    `Mean: ${result.mean.toFixed(3)} ms`
+  ));
+
+  const ciGrid = makeDiagnosticsElement('div', 'stats-ci-grid');
+  const naive = makeDiagnosticsElement('div', 'stats-ci-card');
+  naive.append(
+    makeDiagnosticsElement('span', 'stats-ci-label', '95% CI (raw)'),
+    makeDiagnosticsElement('strong', 'stats-ci-value', formatFrametimeInterval(result.naive)),
+    makeDiagnosticsElement('span', 'stats-ci-note', `${result.n.toLocaleString()} frames`)
+  );
+
+  const corrected = makeDiagnosticsElement('div', 'stats-ci-card corrected');
+  corrected.append(
+    makeDiagnosticsElement('span', 'stats-ci-label', '95% CI (corrected)'),
+    makeDiagnosticsElement('strong', 'stats-ci-value', formatFrametimeInterval(result.corrected)),
+    makeDiagnosticsElement(
+      'span',
+      'stats-ci-note',
+      `${result.effectiveN.toFixed(0)} effective frames`
+    )
+  );
+
+  ciGrid.append(naive, corrected);
+  section.appendChild(ciGrid);
+  container.appendChild(section);
+}
+
+function renderReliabilityDiagnostics(selectedDatasets) {
+  const wrap = document.getElementById('statsDiagnosticsWrap');
+  const content = document.getElementById('statsDiagnosticsContent');
+  if (!wrap || !content) return;
+
+  content.innerHTML = '';
+  selectedDatasets.forEach((dataset, index) => {
+    const frametimes = collectFrametimeSeries(dataset);
+    const card = makeDiagnosticsElement('article', 'stats-diagnostics-card');
+    card.style.setProperty('--stripe', getDatasetColor(index));
+
+    const header = makeDiagnosticsElement('header', 'stats-diagnostics-card-header');
+    header.append(
+      makeDiagnosticsElement('h3', '', dataset.name),
+      makeDiagnosticsElement(
+        'span',
+        'stats-frame-count',
+        `${frametimes.length.toLocaleString()} frames`
+      )
+    );
+    card.appendChild(header);
+
+    if (frametimes.length < 2) {
+      card.appendChild(makeDiagnosticsElement(
+        'p',
+        'stats-diagnostic-explanation',
+        'Need at least two frames.'
+      ));
+    } else {
+      renderPercentileSupport(card, frametimes.length);
+      renderAutocorrelationDiagnostics(card, frametimes);
+      renderConfidenceIntervalDiagnostics(card, frametimes);
+    }
+
+    content.appendChild(card);
+  });
+
+  wrap.classList.toggle('hidden', selectedDatasets.length === 0);
+}
+
 /**
  * Resets the Statistics panel to its empty state (used on clear-all).
  */
@@ -547,6 +865,11 @@ function resetStatsPanel() {
     if (thead) thead.innerHTML = '';
     if (tbody) tbody.innerHTML = '';
   }
+
+  const diagnosticsWrap = document.getElementById('statsDiagnosticsWrap');
+  const diagnosticsContent = document.getElementById('statsDiagnosticsContent');
+  if (diagnosticsWrap) diagnosticsWrap.classList.add('hidden');
+  if (diagnosticsContent) diagnosticsContent.innerHTML = '';
 }
 
 /**
@@ -599,7 +922,7 @@ function updateStatsTable() {
     const headerRow = document.createElement('tr');
     headerRow.innerHTML = '<th class="stats-corner">Metric</th><th>Dataset</th>';
     selectedStats.forEach(stat => {
-      headerRow.innerHTML += `<th>${getStatDisplayName(stat)}</th>`;
+      headerRow.innerHTML += `<th>${getStatDisplayName(stat, regularMetrics)}</th>`;
     });
     thead.appendChild(headerRow);
 
@@ -661,10 +984,11 @@ function updateStatsTable() {
   }
 
   renderAggregateStatsTable(aggregateMetrics, selectedDatasets);
+  renderReliabilityDiagnostics(selectedDatasets);
 }
 
 /**
- * Compact pivot table for aggregate frametime metrics — one row per metric,
+ * Compact pivot table for aggregate frametime metrics - one row per metric,
  * one column per dataset (no empty stat columns).
  */
 function renderAggregateStatsTable(aggregateMetrics, selectedDatasets) {
@@ -787,7 +1111,7 @@ function visualizeStatistics() {
       responsive: true,
       scales: {
         x: { title: { display: true, text: 'Metric' } },
-        y: { title: { display: true, text: getStatDisplayName(statKey) } }
+        y: { title: { display: true, text: getStatDisplayName(statKey, metrics) } }
       }
     }
   });
@@ -798,11 +1122,12 @@ function visualizeStatistics() {
  * @param {string} stat - Statistic key (e.g., 'avg', 'p1', 'stdev')
  * @returns {string} - Human readable name
  */
-function getStatDisplayName(stat) {
+function getStatDisplayName(stat, metrics = []) {
   const displayNames = {
     'max': 'Maximum',
     'min': 'Minimum',
-    'avg': 'Average',
+    'avg': getAverageDisplayLabel(metrics),
+    'median': 'Median',
     'stdev': 'Std Deviation',
     'p1': '1% Percentile',
     'p01': '0.1% Percentile',
@@ -823,6 +1148,8 @@ window.calculateCoefficientOfVariation = calculateCoefficientOfVariation;
 window.calculateRMSSD = calculateRMSSD;
 window.calculateStatistics = calculateStatistics;
 window.calculatePercentile = calculatePercentile;
+window.calculateLagAutocorrelation = calculateLagAutocorrelation;
+window.calculateAutocorrelationCorrectedCI = calculateAutocorrelationCorrectedCI;
 window.analyzeStuttering = analyzeStuttering;
 window.analyzeFramePacing = analyzeFramePacing;
 window.updateStatsTable = updateStatsTable;
@@ -831,3 +1158,4 @@ window.formatStatValue = formatStatValue;
 window.getDatasetColor = getDatasetColor;
 window.visualizeStatistics = visualizeStatistics;
 window.getStatDisplayName = getStatDisplayName;
+window.updateStatsAverageLabel = updateStatsAverageLabel;

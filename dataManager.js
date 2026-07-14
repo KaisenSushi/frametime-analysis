@@ -55,6 +55,7 @@ const FRAMETIME_DERIVED_METRICS = new Set([
 
 const CORE_METRICS = [
   'FPS', 'FrameTime', 'RenderedFPS', 'DisplayedFPS',
+  'MsBetweenPresents', 'MsBetweenDisplayChange',
   'MsGPUBusy', 'MsUntilDisplayed',
   'Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'
 ];
@@ -64,7 +65,13 @@ const STATS_DEFAULT_ACTIVE = new Set(CORE_METRICS);
 // Grouping for the Statistics sidebar metric chips.
 const STATS_METRIC_GROUPS = [
   { label: 'Frame timing', metrics: ['FPS', 'FrameTime'] },
-  { label: 'Display pipeline', metrics: ['RenderedFPS', 'DisplayedFPS'] },
+  {
+    label: 'Display pipeline',
+    metrics: [
+      'RenderedFPS', 'DisplayedFPS',
+      'MsBetweenPresents', 'MsBetweenDisplayChange'
+    ]
+  },
   { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] },
   { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'], hint: 'Derived from frametime. Lower is smoother.' }
 ];
@@ -139,7 +146,7 @@ function parseCfxJson(text, fileName){
   json.Runs.forEach(run=>{
     const cd = run.CaptureData ?? {};
 
-    // Determine how many frames we have – fall back to longest array
+    // Determine how many frames we have - fall back to longest array
     let frames = Array.isArray(cd.MsBetweenPresents) ? cd.MsBetweenPresents.length : 0;
     if (!frames){
       // grab the first array length we can find
@@ -638,7 +645,10 @@ function renderStatsMetricGroups(container, metrics) {
     btn.textContent = getMetricChipLabel(metric);
     const active = firstRender ? STATS_DEFAULT_ACTIVE.has(metric) : previouslyActive.has(metric);
     if (active) btn.classList.add('active');
-    btn.addEventListener('click', () => btn.classList.toggle('active'));
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('active');
+      window.updateStatsAverageLabel?.();
+    });
     return btn;
   };
 
@@ -680,6 +690,8 @@ function renderStatsMetricGroups(container, metrics) {
     section.appendChild(chips);
     container.appendChild(section);
   }
+
+  window.updateStatsAverageLabel?.();
 }
 
 

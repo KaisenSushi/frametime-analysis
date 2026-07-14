@@ -263,6 +263,7 @@ function setupStatsSidebarControls() {
     metricGroup.querySelectorAll('.toggle-button').forEach(btn => {
       btn.classList.toggle('active', predicate(btn.dataset.metric));
     });
+    window.updateStatsAverageLabel?.();
   };
 
   const coreBtn = document.getElementById('statsPresetCore');
