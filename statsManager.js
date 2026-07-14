@@ -605,12 +605,12 @@ function renderFPSGapNote(renderedAvg, displayedAvg) {
 }
 
 const PERCENTILE_SUPPORT_DIAGNOSTICS = [
-  { label: '1%ile', fraction: 0.01 },
-  { label: '0.1%ile', fraction: 0.001 },
-  { label: '0.01%ile', fraction: 0.0001 },
-  { label: '1% Low', fraction: 0.01 },
-  { label: '0.1% Low', fraction: 0.001 },
-  { label: '0.01% Low', fraction: 0.0001 }
+  { key: 'p1', label: '1%ile', fraction: 0.01 },
+  { key: 'p01', label: '0.1%ile', fraction: 0.001 },
+  { key: 'p001', label: '0.01%ile', fraction: 0.0001 },
+  { key: 'low1', label: '1% Low', fraction: 0.01 },
+  { key: 'low01', label: '0.1% Low', fraction: 0.001 },
+  { key: 'low001', label: '0.01% Low', fraction: 0.0001 }
 ];
 
 /**
@@ -867,6 +867,217 @@ function renderReliabilityDiagnostics(selectedDatasets) {
   });
 }
 
+let latestStatsExportState = null;
+
+function buildExportReliabilityDiagnostics(dataset, selectedStats) {
+  const frametimes = collectFrametimeSeries(dataset);
+  const lag1 = calculateLagAutocorrelation(frametimes, 1);
+  const confidenceInterval = calculateAutocorrelationCorrectedCI(frametimes);
+  const selectedStatSet = new Set(selectedStats);
+  const percentileSupport = {};
+
+  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ key, label, fraction }) => {
+    if (!selectedStatSet.has(key)) return;
+    const expectedFrames = frametimes.length * fraction;
+    const status = getPercentileSupportStatus(expectedFrames);
+    percentileSupport[label] = {
+      expectedTailFrameCount: expectedFrames,
+      confidence: status.label
+    };
+  });
+
+  return {
+    basedOnMetric: 'Frame Time',
+    validFrametimeCount: frametimes.length,
+    lagOneAutocorrelationCoefficient: Number.isFinite(lag1) ? lag1 : null,
+    autocorrelationInterpretation: interpretAutocorrelation(lag1),
+    percentileSampleSupport: percentileSupport,
+    autocorrelationCorrected95PercentConfidenceInterval: confidenceInterval
+      ? {
+          lowerMilliseconds: confidenceInterval.corrected[0],
+          upperMilliseconds: confidenceInterval.corrected[1],
+          effectiveSampleSize: confidenceInterval.effectiveN
+        }
+      : null
+  };
+}
+
+function exportNumber(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function buildStatsJsonExport(state = latestStatsExportState) {
+  if (!state) return null;
+
+  const metricDescriptions = {};
+  state.metrics.forEach(metric => {
+    metricDescriptions[getMetricDisplayName(metric)] = getMetricDescription(metric);
+  });
+
+  const statisticDescriptions = {};
+  state.selectedStats.forEach(stat => {
+    const label = getStatDisplayName(stat, state.regularMetrics);
+    statisticDescriptions[label] = getStatDescription(stat);
+  });
+
+  return {
+    exportSource: 'Frame Timing Analyzer',
+    generatedAt: state.generatedAt,
+    datasets: state.datasets.map(entry => {
+      const stats = {};
+      state.metrics.forEach(metric => {
+        const metricLabel = getMetricDisplayName(metric);
+        const metricStats = entry.stats[metric] || {};
+        stats[metricLabel] = {};
+
+        Object.entries(metricStats).forEach(([stat, value]) => {
+          const statLabel = stat === 'aggregateValue'
+            ? 'Aggregate Value'
+            : getStatDisplayName(stat, [metric]);
+          stats[metricLabel][statLabel] = exportNumber(value);
+        });
+      });
+
+      return {
+        name: entry.dataset.name,
+        rowCount: entry.dataset.rows.length,
+        stats,
+        reliabilityDiagnostics: entry.reliabilityDiagnostics
+      };
+    }),
+    metricDescriptions,
+    statisticDescriptions
+  };
+}
+
+function escapeMarkdown(value) {
+  return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function buildStatsMarkdownExport(state = latestStatsExportState) {
+  if (!state) return '';
+
+  const lines = [
+    'This is frame timing data exported from a Frame Timing Analyzer. Compare the datasets and explain which run performs better and why.',
+    '',
+    '## Datasets'
+  ];
+
+  state.datasets.forEach(entry => {
+    lines.push(`- ${escapeMarkdown(entry.dataset.name)}: ${entry.dataset.rows.length.toLocaleString()} rows/frames`);
+  });
+
+  lines.push('', '## Statistics');
+  const headers = ['Metric', ...state.datasets.map(entry => escapeMarkdown(entry.dataset.name))];
+  lines.push(`| ${headers.join(' | ')} |`);
+  lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
+
+  state.metrics.forEach(metric => {
+    const cells = state.datasets.map(entry => {
+      const metricStats = entry.stats[metric] || {};
+      return Object.entries(metricStats).map(([stat, value]) => {
+        const statLabel = stat === 'aggregateValue'
+          ? 'Value'
+          : getStatDisplayName(stat, [metric]);
+        return `${escapeMarkdown(statLabel)}: ${formatStatValue(metric, stat, value)}`;
+      }).join('<br>');
+    });
+    lines.push(`| ${escapeMarkdown(getMetricDisplayName(metric))} | ${cells.join(' | ')} |`);
+  });
+
+  const glossary = [];
+  state.metrics.forEach(metric => {
+    const description = getMetricDescription(metric);
+    if (description) {
+      glossary.push(`- **${escapeMarkdown(getMetricDisplayName(metric))}:** ${escapeMarkdown(description)}`);
+    }
+  });
+  state.selectedStats.forEach(stat => {
+    const description = getStatDescription(stat);
+    if (description) {
+      glossary.push(`- **${escapeMarkdown(getStatDisplayName(stat, state.regularMetrics))}:** ${escapeMarkdown(description)}`);
+    }
+  });
+
+  if (glossary.length) {
+    lines.push('', '## Glossary', ...glossary);
+  }
+
+  lines.push('', '## Reliability notes');
+  state.datasets.forEach(entry => {
+    const diagnostics = entry.reliabilityDiagnostics;
+    const lag1 = diagnostics.lagOneAutocorrelationCoefficient;
+    const lagText = Number.isFinite(lag1) ? lag1.toFixed(3) : 'N/A';
+    lines.push(
+      `- **${escapeMarkdown(entry.dataset.name)}:** ${diagnostics.validFrametimeCount.toLocaleString()} valid frametimes; lag-1 autocorrelation ${lagText}. ${escapeMarkdown(diagnostics.autocorrelationInterpretation)}`
+    );
+
+    Object.entries(diagnostics.percentileSampleSupport).forEach(([label, support]) => {
+      lines.push(
+        `  - ${escapeMarkdown(label)} support: ${formatSupportCount(support.expectedTailFrameCount)} tail frames, ${support.confidence}.`
+      );
+    });
+  });
+
+  return lines.join('\n');
+}
+
+async function copyStatsAsMarkdown() {
+  const markdown = buildStatsMarkdownExport();
+  if (!markdown) {
+    window.notify?.('Calculate statistics before exporting.', 'warning');
+    return;
+  }
+
+  try {
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(markdown);
+        copied = true;
+      } catch (error) {
+        copied = false;
+      }
+    }
+
+    if (!copied) {
+      const textarea = document.createElement('textarea');
+      textarea.value = markdown;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Clipboard copy was not available.');
+    }
+    window.notify?.('Statistics copied as Markdown.', 'success');
+  } catch (error) {
+    window.notify?.(`Could not copy statistics: ${error.message}`, 'error');
+  }
+}
+
+function downloadStatsAsJson() {
+  const exportData = buildStatsJsonExport();
+  if (!exportData) {
+    window.notify?.('Calculate statistics before exporting.', 'warning');
+    return;
+  }
+
+  const json = JSON.stringify(exportData, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  link.href = url;
+  link.download = `frametime-stats-export-${timestamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  window.notify?.('Statistics JSON downloaded.', 'success');
+}
+
 /**
  * Resets the Statistics panel to its empty state (used on clear-all).
  */
@@ -892,6 +1103,9 @@ function resetStatsPanel() {
     if (tbody) tbody.innerHTML = '';
   }
 
+  latestStatsExportState = null;
+  window.latestStatsExportData = null;
+  document.getElementById('statsExportActions')?.classList.add('hidden');
 }
 
 /**
@@ -930,6 +1144,18 @@ function updateStatsTable() {
 
   const regularMetrics = selectedMetrics.filter(m => !isAggregateMetric(m));
   const aggregateMetrics = selectedMetrics.filter(m => isAggregateMetric(m));
+  const exportState = {
+    generatedAt: new Date().toISOString(),
+    metrics: selectedMetrics.slice(),
+    regularMetrics: regularMetrics.slice(),
+    aggregateMetrics: aggregateMetrics.slice(),
+    selectedStats: selectedStats.slice(),
+    datasets: selectedDatasets.map(dataset => ({
+      dataset,
+      stats: {},
+      reliabilityDiagnostics: null
+    }))
+  };
 
   const mainWrap = document.getElementById('statsMainTableWrap');
   const statsTable = document.getElementById('statsTable');
@@ -957,6 +1183,12 @@ function updateStatsTable() {
           name: dataset.name,
           stats: calculateStatistics(values, metric)
         };
+      });
+      datasetStats.forEach((datasetResult, datasetIndex) => {
+        exportState.datasets[datasetIndex].stats[metric] = {};
+        selectedStats.forEach(stat => {
+          exportState.datasets[datasetIndex].stats[metric][stat] = datasetResult.stats[stat];
+        });
       });
       const isFpsMetric = isFpsLikeMetric(metric);
       const metricLabel = typeof window.getMetricChipLabel === 'function'
@@ -1008,14 +1240,23 @@ function updateStatsTable() {
     mainWrap.classList.add('hidden');
   }
 
-  renderAggregateStatsTable(aggregateMetrics, selectedDatasets);
+  renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState);
+  exportState.datasets.forEach(entry => {
+    entry.reliabilityDiagnostics = buildExportReliabilityDiagnostics(
+      entry.dataset,
+      selectedStats
+    );
+  });
+  latestStatsExportState = exportState;
+  window.latestStatsExportData = buildStatsJsonExport(exportState);
+  document.getElementById('statsExportActions')?.classList.remove('hidden');
 }
 
 /**
  * Compact pivot table for aggregate frametime metrics - one row per metric,
  * one column per dataset (no empty stat columns).
  */
-function renderAggregateStatsTable(aggregateMetrics, selectedDatasets) {
+function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState = null) {
   const wrap = document.getElementById('statsAggregateWrap');
   const table = document.getElementById('statsAggregateTable');
   if (!wrap || !table) return;
@@ -1060,6 +1301,12 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets) {
     const values = selectedDatasets.map(ds =>
       calculateAggregateMetric(collectFrametimeSeries(ds), metric)
     );
+    values.forEach((value, datasetIndex) => {
+      if (!exportState?.datasets[datasetIndex]) return;
+      exportState.datasets[datasetIndex].stats[metric] = {
+        aggregateValue: value
+      };
+    });
 
     values.forEach((value, dsIndex) => {
       const cell = document.createElement('td');
@@ -1164,6 +1411,21 @@ function getStatDisplayName(stat, metrics = []) {
   return displayNames[stat] || stat;
 }
 
+function getStatDescription(stat) {
+  const descriptions = {
+    'avg': 'Mean value; harmonic for FPS metrics and arithmetic for time-based metrics.',
+    'median': 'Middle value after sorting the samples.',
+    'stdev': 'Sample standard deviation showing how widely values vary around the mean.',
+    'p1': 'Tail percentile cutoff representing the worst 1% of samples.',
+    'p01': 'Tail percentile cutoff representing the worst 0.1% of samples.',
+    'p001': 'Tail percentile cutoff representing the worst 0.01% of samples.',
+    'low1': 'Average performance across the worst 1% of samples.',
+    'low01': 'Average performance across the worst 0.1% of samples.',
+    'low001': 'Average performance across the worst 0.01% of samples.'
+  };
+  return descriptions[stat] || '';
+}
+
 // Expose these to the global scope:
 window.collectMetricValues = collectMetricValues;
 window.getMetricValue = getMetricValue;
@@ -1184,4 +1446,9 @@ window.formatStatValue = formatStatValue;
 window.getDatasetColor = getDatasetColor;
 window.visualizeStatistics = visualizeStatistics;
 window.getStatDisplayName = getStatDisplayName;
+window.getStatDescription = getStatDescription;
 window.updateStatsAverageLabel = updateStatsAverageLabel;
+window.buildStatsMarkdownExport = buildStatsMarkdownExport;
+window.buildStatsJsonExport = buildStatsJsonExport;
+window.copyStatsAsMarkdown = copyStatsAsMarkdown;
+window.downloadStatsAsJson = downloadStatsAsJson;

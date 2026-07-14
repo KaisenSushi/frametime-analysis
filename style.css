@@ -1487,6 +1487,41 @@ button:active { transform: scale(0.98); }
   flex: 1;
 }
 
+.stats-export-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.stats-export-actions > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stats-export-actions > div {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 600px) {
+  .stats-export-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stats-export-actions > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 /* Reliability tab */
 .reliability-page {
   gap: 14px;

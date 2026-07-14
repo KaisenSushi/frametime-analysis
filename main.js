@@ -104,6 +104,11 @@ document.addEventListener('DOMContentLoaded', () => {
     calcStatsBtn.addEventListener('click', updateStatsTable); // from statsManager.js
   }
 
+  document.getElementById('copyStatsMarkdownBtn')
+    ?.addEventListener('click', () => window.copyStatsAsMarkdown?.());
+  document.getElementById('downloadStatsJsonBtn')
+    ?.addEventListener('click', () => window.downloadStatsAsJson?.());
+
   setupStatsSidebarControls();
   setupVizChartTypeControls();
 
