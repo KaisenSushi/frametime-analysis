@@ -1,5 +1,8 @@
 /* ── Design tokens (dark only) ── */
 :root {
+  /* Render native form controls and popups (color picker, scrollbars,
+     dropdowns) in dark mode to match the app theme. */
+  color-scheme: dark;
   --accent: #6b6b6b;
   --accent-hover: #7a7a7a;
   --accent-light: rgba(255, 255, 255, 0.06);
@@ -770,6 +773,8 @@ button:active { transform: scale(0.98); }
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  color-scheme: dark;
+  background: var(--bg-elevated, #1a1a1a);
 }
 
 .color-preview {
