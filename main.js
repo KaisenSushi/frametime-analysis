@@ -78,10 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     randomColorBtn.addEventListener('click', () => {
       const colorSelect = document.getElementById('colorSelect');
       if (!colorSelect) return;
-      const idx = Math.floor(Math.random() * 14);
-      colorSelect.value = typeof window.getBenchmarkColor === 'function'
-        ? window.getBenchmarkColor(idx)
-        : randomColor();
+      colorSelect.value = pickUnusedColor();
       applyColorToSelectedDatasets();
     });
   }
@@ -129,9 +126,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // 12. Color preview updates
   const colorSelect = document.getElementById('colorSelect');
   if (colorSelect) {
-    const previewUpdate = () => applyColorToSelectedDatasets();
-    colorSelect.addEventListener('input', previewUpdate);
-    colorSelect.addEventListener('change', previewUpdate);
+    // Live drag only updates the swatch preview; the color is committed (and
+    // checked for duplicates) once the user finishes picking.
+    colorSelect.addEventListener('input', updateColorPreview);
+    colorSelect.addEventListener('change', applyColorToSelectedDatasets);
     updateColorPreview();
   }
 
@@ -326,14 +324,47 @@ function applyColorToSelectedDatasets() {
   if (!colorInput) return;
   updateColorPreview();
   if (!sel || !sel.selectedOptions.length) return;
-  const color = colorInput.value;
-  Array.from(sel.selectedOptions).forEach(opt => {
-    const ds = window.allDatasets?.[+opt.value];
-    if (ds) ds.color = color;
+  const color = colorInput.value.toLowerCase();
+  const selectedIdx = Array.from(sel.selectedOptions).map(opt => +opt.value);
+
+  // Every dataset must keep a unique color so they stay distinguishable across
+  // the Visualization, Statistics and Reliability tabs.
+  const clash = (window.allDatasets || []).some(
+    (ds, i) => !selectedIdx.includes(i) && (ds.color || '').toLowerCase() === color
+  );
+  if (clash) {
+    window.notify?.('That color is already used by another dataset. Pick a different one.', 'warning');
+    syncColorPickerFromSelection();
+    return;
+  }
+
+  selectedIdx.forEach(i => {
+    const ds = window.allDatasets?.[i];
+    if (ds) ds.color = colorInput.value;
   });
   if (typeof window.refreshDatasetLists === 'function') {
     window.refreshDatasetLists();
   }
+}
+
+// Pick the first palette color not already used by a dataset, falling back to a
+// random distinct color if every palette slot is taken.
+function pickUnusedColor() {
+  const used = new Set(
+    (window.allDatasets || []).map(ds => (ds.color || '').toLowerCase())
+  );
+  if (typeof window.getBenchmarkColor === 'function') {
+    for (let i = 0; i < 14; i++) {
+      const candidate = window.getBenchmarkColor(i);
+      if (!used.has(candidate.toLowerCase())) return candidate;
+    }
+  }
+  let candidate = randomColor();
+  let guard = 0;
+  while (used.has(candidate.toLowerCase()) && guard++ < 50) {
+    candidate = randomColor();
+  }
+  return candidate;
 }
 
 // Random color generator

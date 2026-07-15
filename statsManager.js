@@ -121,13 +121,22 @@ function calculateAggregateMetric(values, metricName) {
     default: return NaN;
   }
 }
-const STATS_DATASET_COLORS = [
-  '#4bc0c0', '#c084fc', '#f97316', '#38bdf8', '#f472b6',
-  '#a3e635', '#fbbf24', '#818cf8', '#2dd4bf', '#fb7185'
-];
-
+// Fall back to the shared visualization palette so colors match across tabs.
 function getDatasetColor(index) {
-  return STATS_DATASET_COLORS[index % STATS_DATASET_COLORS.length];
+  if (typeof window.getBenchmarkColor === 'function') {
+    return window.getBenchmarkColor(index);
+  }
+  const fallback = [
+    '#38bdf8', '#ff8c00', '#c084fc', '#fbbf24', '#2dd4bf', '#f472b6',
+    '#a3e635', '#818cf8', '#e879f9', '#5eead4', '#fb923c', '#60a5fa',
+    '#f9a8d4', '#deb887'
+  ];
+  return fallback[index % fallback.length];
+}
+
+// Prefer a dataset's assigned color so the Statistics tab matches the chart.
+function getStatsDatasetColor(dataset, index) {
+  return dataset?.color || getDatasetColor(index);
 }
 
 // Single-value aggregate metrics derived from the frametime series.
@@ -553,7 +562,7 @@ function renderStatsSummary(selectedDatasets) {
     const untilAvg = averageForMetric(untilDisplayed, 'MsUntilDisplayed');
     const srsd = calculateStepwiseRelativeSD(frametimes);
 
-    const color = getDatasetColor(index);
+    const color = getStatsDatasetColor(dataset, index);
 
     return `
       <div class="stats-summary-card" style="--card-accent:${color}">
@@ -838,7 +847,7 @@ function renderReliabilityDiagnostics(selectedDatasets) {
   selectedDatasets.forEach((dataset, index) => {
     const frametimes = collectFrametimeSeries(dataset);
     const card = makeDiagnosticsElement('article', 'stats-diagnostics-card');
-    card.style.setProperty('--stripe', dataset.color || getDatasetColor(index));
+    card.style.setProperty('--stripe', getStatsDatasetColor(dataset, index));
 
     const header = makeDiagnosticsElement('header', 'stats-diagnostics-card-header');
     header.append(
@@ -1203,10 +1212,11 @@ function updateStatsTable() {
     let rowIndex = 0;
 
     regularMetrics.forEach(metric => {
-      const datasetStats = selectedDatasets.map(dataset => {
+      const datasetStats = selectedDatasets.map((dataset, dsIdx) => {
         const values = collectMetricValues(dataset, metric);
         return {
           name: dataset.name,
+          color: getStatsDatasetColor(dataset, dsIdx),
           stats: calculateStatistics(values, metric)
         };
       });
@@ -1238,7 +1248,7 @@ function updateStatsTable() {
 
         const nameCell = document.createElement('td');
         nameCell.className = 'dataset-name-cell stats-row-stripe';
-        nameCell.style.setProperty('--stripe', getDatasetColor(dsIndex));
+        nameCell.style.setProperty('--stripe', dsStats.color || getDatasetColor(dsIndex));
         nameCell.textContent = dsStats.name;
         row.appendChild(nameCell);
 
@@ -1313,7 +1323,7 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
     const th = document.createElement('th');
     th.className = 'stats-dataset-header';
     th.title = ds.name;
-    th.innerHTML = `<span class="stats-header-stripe" style="--stripe:${getDatasetColor(i)}"></span><span class="stats-header-name">${ds.name}</span>`;
+    th.innerHTML = `<span class="stats-header-stripe" style="--stripe:${getStatsDatasetColor(ds, i)}"></span><span class="stats-header-name">${ds.name}</span>`;
     headerRow.appendChild(th);
   });
   thead.appendChild(headerRow);

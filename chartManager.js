@@ -3,11 +3,12 @@ window.mainChart = null;
 window.chartDatasets = [];
 window.currentChartMetric = '';
 
-// Benchmark palette from BoringBoredom's Frame-Time-Analysis
+// Shared dataset palette used across every tab. Ordered to avoid leading with
+// red/green and to keep adjacent datasets visually distinct.
 const BENCHMARK_COLORS = [
-  '#800000', '#008000', '#00bfff', '#ff8c00', '#ff00ff', '#deb887',
-  '#00ff00', '#0000ff', '#000080', '#2f4f4f', '#ffff54', '#dda0dd',
-  '#ff1493', '#7fffd4'
+  '#38bdf8', '#ff8c00', '#c084fc', '#fbbf24', '#2dd4bf', '#f472b6',
+  '#a3e635', '#818cf8', '#e879f9', '#5eead4', '#fb923c', '#60a5fa',
+  '#f9a8d4', '#deb887'
 ];
 
 const CHART_TEXT = 'rgba(255,255,255,0.88)';
