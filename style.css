@@ -1171,6 +1171,85 @@ button:active { transform: scale(0.98); }
   line-height: 1.45;
 }
 
+.stats-diagnostic-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.stats-diagnostic-tag {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* Compact technical readout table for diagnostics */
+.diag-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.diag-table th {
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.diag-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diag-table tr:last-child td {
+  border-bottom: none;
+}
+
+.diag-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.diag-num {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.diag-table th.diag-num {
+  text-align: center;
+}
+
+.diag-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.diag-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.diag-dot.reliable { background: var(--success); }
+.diag-dot.low-confidence { background: var(--warning); }
+.diag-dot.insufficient { background: var(--error); }
+
+.diag-status-text {
+  color: var(--text-secondary);
+}
+
 .stats-support-list {
   display: flex;
   flex-direction: column;

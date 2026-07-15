@@ -701,12 +701,12 @@ function formatSupportCount(value) {
 }
 
 function interpretAutocorrelation(r1) {
-  if (!Number.isFinite(r1)) return 'No variance in the series.';
-  if (r1 >= 0.5) return 'Strong clustering: slow frames follow slow frames.';
-  if (r1 >= 0.25) return 'Moderate clustering.';
-  if (r1 >= 0.1) return 'Mild clustering.';
-  if (r1 <= -0.1) return 'Frames tend to alternate fast/slow.';
-  return 'Frames behave roughly independently.';
+  if (!Number.isFinite(r1)) return 'no variance';
+  if (r1 >= 0.5) return 'strong clustering';
+  if (r1 >= 0.25) return 'moderate clustering';
+  if (r1 >= 0.1) return 'mild clustering';
+  if (r1 <= -0.1) return 'alternating';
+  return 'independent';
 }
 
 function makeDiagnosticsElement(tag, className, text) {
@@ -720,47 +720,50 @@ function renderPercentileSupport(container, frameCount) {
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
   section.appendChild(makeDiagnosticsElement('h4', '', 'Percentile sample support'));
 
-  const list = makeDiagnosticsElement('div', 'stats-support-list');
+  const table = makeDiagnosticsElement('table', 'diag-table');
+  const thead = document.createElement('thead');
+  thead.innerHTML =
+    '<tr><th scope="col">Percentile</th><th scope="col" class="diag-num">Tail frames</th><th scope="col">Status</th></tr>';
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
   PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ label, fraction }) => {
     const expected = frameCount * fraction;
     const status = getPercentileSupportStatus(expected);
-    const row = makeDiagnosticsElement('div', 'stats-support-row');
-    row.append(
-      makeDiagnosticsElement('span', 'stats-support-name', label),
-      makeDiagnosticsElement('span', 'stats-support-count', `${formatSupportCount(expected)} frames`),
-      makeDiagnosticsElement(
-        'span',
-        `stats-reliability-badge ${status.className}`,
-        status.label
-      )
-    );
-    list.appendChild(row);
-  });
+    const row = document.createElement('tr');
 
-  section.appendChild(list);
+    const statusCell = makeDiagnosticsElement('td', 'diag-status');
+    statusCell.append(
+      makeDiagnosticsElement('span', `diag-dot ${status.className}`),
+      makeDiagnosticsElement('span', 'diag-status-text', status.label)
+    );
+
+    row.append(
+      makeDiagnosticsElement('td', 'diag-name', label),
+      makeDiagnosticsElement('td', 'diag-num', formatSupportCount(expected)),
+      statusCell
+    );
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+
+  section.appendChild(table);
   container.appendChild(section);
 }
 
 function renderAutocorrelationDiagnostics(container, frametimes) {
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
-  section.appendChild(makeDiagnosticsElement('h4', '', 'Frametime autocorrelation'));
+  const head = makeDiagnosticsElement('div', 'stats-diagnostic-head');
+  head.append(
+    makeDiagnosticsElement('h4', '', 'Autocorrelation'),
+    makeDiagnosticsElement('span', 'stats-diagnostic-tag', interpretAutocorrelation(calculateLagAutocorrelation(frametimes, 1)))
+  );
+  section.appendChild(head);
 
   const acfValues = [1, 2, 3].map(lag => ({
     lag,
     value: calculateLagAutocorrelation(frametimes, lag)
   }));
-  const r1 = acfValues[0].value;
-  const valueText = Number.isFinite(r1) ? r1.toFixed(3) : 'N/A';
-  section.appendChild(makeDiagnosticsElement(
-    'div',
-    'stats-diagnostic-primary',
-    `Autocorrelation (lag-1): ${valueText}`
-  ));
-  section.appendChild(makeDiagnosticsElement(
-    'p',
-    'stats-diagnostic-explanation',
-    interpretAutocorrelation(r1)
-  ));
 
   const acf = makeDiagnosticsElement('div', 'stats-acf');
   acfValues.forEach(({ lag, value }) => {
@@ -796,7 +799,7 @@ function formatFrametimeInterval(interval) {
 
 function renderConfidenceIntervalDiagnostics(container, frametimes) {
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
-  section.appendChild(makeDiagnosticsElement('h4', '', 'Mean confidence interval'));
+  section.appendChild(makeDiagnosticsElement('h4', '', 'Mean (95% CI)'));
 
   const result = calculateAutocorrelationCorrectedCI(frametimes);
   if (!result) {
@@ -818,19 +821,19 @@ function renderConfidenceIntervalDiagnostics(container, frametimes) {
   const ciGrid = makeDiagnosticsElement('div', 'stats-ci-grid');
   const naive = makeDiagnosticsElement('div', 'stats-ci-card');
   naive.append(
-    makeDiagnosticsElement('span', 'stats-ci-label', '95% CI (raw)'),
+    makeDiagnosticsElement('span', 'stats-ci-label', 'raw'),
     makeDiagnosticsElement('strong', 'stats-ci-value', formatFrametimeInterval(result.naive)),
-    makeDiagnosticsElement('span', 'stats-ci-note', `${result.n.toLocaleString()} frames`)
+    makeDiagnosticsElement('span', 'stats-ci-note', `n = ${result.n.toLocaleString()}`)
   );
 
   const corrected = makeDiagnosticsElement('div', 'stats-ci-card corrected');
   corrected.append(
-    makeDiagnosticsElement('span', 'stats-ci-label', '95% CI (corrected)'),
+    makeDiagnosticsElement('span', 'stats-ci-label', 'autocorr. corrected'),
     makeDiagnosticsElement('strong', 'stats-ci-value', formatFrametimeInterval(result.corrected)),
     makeDiagnosticsElement(
       'span',
       'stats-ci-note',
-      `${result.effectiveN.toFixed(0)} effective frames`
+      `n_eff = ${Math.round(result.effectiveN).toLocaleString()}`
     )
   );
 
