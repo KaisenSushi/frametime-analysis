@@ -56,11 +56,10 @@ function collectReliabilityMetricValues(dataset, metric) {
 }
 
 function getSelectedReliabilityDatasets() {
-  const select = document.getElementById('reliabilityDatasetSelect');
   const all = window.allDatasets || [];
-  if (!select) return all.slice();
-
-  const indices = Array.from(select.selectedOptions).map(opt => parseInt(opt.value, 10));
+  const indices = typeof window.getDatasetPickerIndices === 'function'
+    ? window.getDatasetPickerIndices('reliabilityDatasetSelect')
+    : [];
   if (!indices.length) return [];
 
   return indices

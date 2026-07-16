@@ -173,45 +173,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Populate all dataset selection dropdowns
 function populateAllDatasetSelects() {
-  // Get all dataset selection dropdowns
-  const selectors = [
-    document.getElementById('datasetSelect'),
+  const nativeSelectors = [
+    document.getElementById('datasetSelect')
+  ];
+  const pickers = [
     document.getElementById('statDatasetSelect'),
     document.getElementById('reliabilityDatasetSelect')
   ];
-  
-  // Clear and repopulate each select
-  selectors.forEach(selector => {
+
+  nativeSelectors.forEach(selector => {
     if (!selector) return;
-    
-    // Preserve current selection(s), including multi-select controls.
+
     const currentValues = selector.multiple
       ? Array.from(selector.selectedOptions).map(option => option.value)
       : [selector.value];
-    
-    // Clear existing options
+
     selector.innerHTML = '';
-    
-    // Add option for each dataset
+
     (window.allDatasets || []).forEach((dataset, id) => {
       const option = document.createElement('option');
       option.value = id;
       option.textContent = dataset.name;
       selector.appendChild(option);
     });
-    
-    // Restore previous selection(s) when possible.
+
     if (selector.multiple) {
-      // Stats and Reliability pickers pre-select everything when nothing was
-      // previously chosen so newly uploaded datasets are ready to use.
-      const hadSelection = currentValues.some(v => v !== '');
-      const autoSelectAll = (
-        selector.id === 'statDatasetSelect' ||
-        selector.id === 'reliabilityDatasetSelect'
-      ) && !hadSelection;
       Array.from(selector.options).forEach(option => {
-        option.selected = autoSelectAll || currentValues.includes(option.value);
+        option.selected = currentValues.includes(option.value);
       });
+      fitMultiSelectHeight(selector);
     } else {
       const currentValue = currentValues[0];
       if (currentValue && selector.querySelector(`option[value="${currentValue}"]`)) {
@@ -219,6 +209,87 @@ function populateAllDatasetSelects() {
       }
     }
   });
+
+  pickers.forEach(picker => {
+    if (!picker) return;
+    const currentValues = getDatasetPickerValues(picker);
+    const hadSelection = currentValues.length > 0;
+    const autoSelectAll = !hadSelection;
+
+    picker.innerHTML = '';
+    (window.allDatasets || []).forEach((dataset, id) => {
+      const label = document.createElement('label');
+      label.className = 'stats-dataset-option';
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = String(id);
+      input.checked = autoSelectAll || currentValues.includes(String(id));
+
+      const name = document.createElement('span');
+      name.textContent = dataset.name;
+
+      label.classList.toggle('is-selected', input.checked);
+      input.addEventListener('change', () => {
+        label.classList.toggle('is-selected', input.checked);
+        if (picker.id === 'reliabilityDatasetSelect') {
+          window.renderReliabilityPage?.();
+        }
+      });
+
+      label.appendChild(input);
+      label.appendChild(name);
+      picker.appendChild(label);
+    });
+  });
+}
+
+/** Selected values from a Stats/Reliability checkbox picker. */
+function getDatasetPickerValues(picker) {
+  if (!picker) return [];
+  return Array.from(picker.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(input => input.value);
+}
+
+/** Selected dataset indices from a Stats/Reliability checkbox picker. */
+function getDatasetPickerIndices(pickerOrId) {
+  const picker = typeof pickerOrId === 'string'
+    ? document.getElementById(pickerOrId)
+    : pickerOrId;
+  return getDatasetPickerValues(picker)
+    .map(v => parseInt(v, 10))
+    .filter(Number.isInteger);
+}
+
+function setDatasetPickerAll(pickerOrId, selected) {
+  const picker = typeof pickerOrId === 'string'
+    ? document.getElementById(pickerOrId)
+    : pickerOrId;
+  if (!picker) return;
+  picker.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    input.checked = selected;
+    input.closest('.stats-dataset-option')?.classList.toggle('is-selected', selected);
+  });
+}
+
+/**
+ * Native <select multiple> ignores content height in CSS; set height from
+ * option count × row height, capped at max-height (120px).
+ */
+function fitMultiSelectHeight(select) {
+  if (!select || !select.multiple) return;
+
+  const maxHeight = 120;
+  const rowHeight = 24;
+  const padding = 8;
+  const count = select.options.length;
+  const height = count === 0
+    ? rowHeight + padding
+    : Math.min(maxHeight, count * rowHeight + padding);
+
+  select.style.height = `${height}px`;
+  select.style.overflowY = height >= maxHeight && count > 0 ? 'auto' : 'hidden';
+  select.size = Math.max(1, Math.min(count || 1, Math.floor(maxHeight / rowHeight)));
 }
 
 // Show/hide visualization controls based on chart type.
@@ -257,29 +328,26 @@ function updateVizControlsForChartType() {
 
 // Wire the Statistics / Reliability sidebar helper links.
 function setupStatsSidebarControls() {
-  const wireMultiSelect = (selectId, selectAllId, clearId, onChange) => {
-    const select = document.getElementById(selectId);
+  const wireDatasetPicker = (pickerId, selectAllId, clearId, onChange) => {
+    const picker = document.getElementById(pickerId);
     const selectAllBtn = document.getElementById(selectAllId);
     const clearSelBtn = document.getElementById(clearId);
-    if (selectAllBtn && select) {
+    if (selectAllBtn && picker) {
       selectAllBtn.addEventListener('click', () => {
-        Array.from(select.options).forEach(opt => (opt.selected = true));
+        setDatasetPickerAll(picker, true);
         onChange?.();
       });
     }
-    if (clearSelBtn && select) {
+    if (clearSelBtn && picker) {
       clearSelBtn.addEventListener('click', () => {
-        Array.from(select.options).forEach(opt => (opt.selected = false));
+        setDatasetPickerAll(picker, false);
         onChange?.();
       });
-    }
-    if (select && onChange) {
-      select.addEventListener('change', onChange);
     }
   };
 
-  wireMultiSelect('statDatasetSelect', 'statsSelectAll', 'statsClearSel');
-  wireMultiSelect(
+  wireDatasetPicker('statDatasetSelect', 'statsSelectAll', 'statsClearSel');
+  wireDatasetPicker(
     'reliabilityDatasetSelect',
     'reliabilitySelectAll',
     'reliabilityClearSel',
@@ -472,3 +540,6 @@ function notify(msg, type = 'info') {
 // Export notify to the global scope
 window.notify = notify;
 window.populateAllDatasetSelects = populateAllDatasetSelects;
+window.getDatasetPickerValues = getDatasetPickerValues;
+window.getDatasetPickerIndices = getDatasetPickerIndices;
+window.setDatasetPickerAll = setDatasetPickerAll;

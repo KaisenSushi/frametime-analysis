@@ -335,7 +335,6 @@ body {
 .viz-field-row:last-of-type { margin-bottom: 0; }
 
 .viz-select,
-.stats-dataset-select,
 select,
 input[type="number"],
 input[type="text"] {
@@ -351,7 +350,6 @@ input[type="text"] {
 }
 
 .viz-select:focus,
-.stats-dataset-select:focus,
 select:focus,
 input:focus {
   outline: none;
@@ -671,23 +669,70 @@ label {
 }
 
 select[multiple] {
-  min-height: 120px;
+  min-height: 0;
   padding: 6px;
 }
 
-.viz-select[multiple],
-.stats-dataset-select {
-  min-height: 72px;
-  padding: 4px;
-}
-
-.stats-dataset-select {
+.viz-select[multiple] {
+  min-height: 0;
   max-height: 120px;
+  padding: 4px;
+  overflow-y: auto;
 }
 
-.stats-dataset-select option {
+.viz-select[multiple] option {
   padding: 4px 6px;
   border-radius: var(--radius-sm);
+}
+
+/* Checkbox list — sizes to content; scrolls only past max-height */
+.stats-dataset-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 120px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+
+.stats-dataset-picker:empty {
+  min-height: 28px;
+}
+
+.stats-dataset-option {
+  display: block;
+  margin: 0;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  line-height: 1.3;
+}
+
+.stats-dataset-option:hover {
+  background: var(--bg-hover);
+}
+
+.stats-dataset-option:has(input:checked),
+.stats-dataset-option.is-selected {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.stats-dataset-option input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 .checkbox-label {
@@ -1004,11 +1049,41 @@ button:active { transform: scale(0.98); }
 .empty-stats .empty-stats-message { display: block; }
 .empty-stats #statsMainTableWrap { display: none; }
 .empty-stats .stats-aggregate-wrap { display: none; }
+.empty-stats .stats-tables-divider { display: none; }
 .empty-stats .stats-diagnostics { display: none; }
+
+/* Stack keeps aggregate + main stats as separate blocks with real gap */
+.stats-tables-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.stats-page.stats-has-both-tables .stats-tables-stack {
+  gap: 36px;
+}
 
 /* Aggregate stability metrics - compact pivot (metric x dataset) */
 .stats-aggregate-wrap {
   margin-top: 14px;
+  padding: 12px 12px 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.stats-page.stats-has-both-tables .stats-aggregate-wrap {
+  margin-bottom: 0;
+}
+
+/* Divider element kept for a11y; spacing comes from flex gap */
+.stats-tables-divider {
+  display: none !important;
+  height: 0;
+  margin: 0;
+  border: none;
 }
 
 .stats-aggregate-title {
@@ -1028,7 +1103,15 @@ button:active { transform: scale(0.98); }
 }
 
 .stats-aggregate-table-wrap {
-  margin-top: 0;
+  margin: 0 -12px;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.stats-aggregate-table tr:last-child td {
+  border-bottom: none;
 }
 
 .stats-aggregate-table .stats-dataset-header {
@@ -1525,30 +1608,13 @@ button:active { transform: scale(0.98); }
 .stats-metric-groups {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .stats-metric-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.stats-metric-group-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.stats-metric-group-label .stats-hint {
-  display: block;
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text-muted);
-  margin-top: 2px;
 }
 
 .stats-metric-chips {
@@ -1593,6 +1659,16 @@ button:active { transform: scale(0.98); }
 .stats-calc-btn {
   margin-top: 12px;
   width: 100%;
+}
+
+/* Keep the stat toggles + Calculate reachable while scrolling long metric lists. */
+#statisticsSidebar .viz-panel:last-child {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin-top: 4px;
+  background: var(--bg-surface);
+  box-shadow: 0 -14px 20px rgba(0, 0, 0, 0.35);
 }
 
 /* Results panel */

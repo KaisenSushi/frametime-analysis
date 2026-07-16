@@ -319,7 +319,7 @@ function getMetricValue(row, metric) {
 function calculateStatistics(arr, metricName = '') {
   if (!arr.length) {
     return {
-      max: NaN, min: NaN, avg: NaN, median: NaN, stdev: NaN,
+      max: NaN, min: NaN, avg: NaN, median: NaN, mode: NaN, stdev: NaN,
       p1: NaN, p01: NaN, p001: NaN,
       low1: NaN, low01: NaN, low001: NaN
     };
@@ -329,7 +329,7 @@ function calculateStatistics(arr, metricName = '') {
   if (isAggregateMetric(metricName)) {
     const aggregate = calculateAggregateMetric(arr, metricName);
     return {
-      max: aggregate, min: aggregate, avg: aggregate, median: aggregate, stdev: 0,
+      max: aggregate, min: aggregate, avg: aggregate, median: aggregate, mode: aggregate, stdev: 0,
       p1: aggregate, p01: aggregate, p001: aggregate,
       low1: aggregate, low01: aggregate, low001: aggregate
     };
@@ -342,6 +342,7 @@ function calculateStatistics(arr, metricName = '') {
   const minVal = sorted[0];
   const sum    = sorted.reduce((a, b) => a + b, 0);
   const median = calculatePercentile(sorted, 50);
+  const mode = calculateMode(sorted);
 
   /* -------- determine FPS vs Frame‑time ---------------------------- */
   let isFpsMetric =
@@ -394,6 +395,7 @@ function calculateStatistics(arr, metricName = '') {
     min: minVal,
     avg,
     median,
+    mode,
     stdev,
     p1,  p01,  p001,
     low1, low01, low001
@@ -403,7 +405,7 @@ function calculateStatistics(arr, metricName = '') {
 
 
 function calculatePercentile(sortedArr, percentile) {
-  // percentile expressed as 1 → 1 %, 0.1 → 0.1 %
+  // percentile expressed as 1 → 1 %, 0.1 → 0.1 %
   if (!sortedArr.length) return NaN;
 
   const idx = (percentile / 100) * (sortedArr.length - 1);
@@ -414,6 +416,51 @@ function calculatePercentile(sortedArr, percentile) {
 
   const w = idx - lower;               // linear interpolation weight
   return sortedArr[lower] * (1 - w) + sortedArr[upper] * w;
+}
+
+/**
+ * Continuous unimodal mode (peak of the density), not raw most-frequent value.
+ * Uses the half-sample mode (HSM): repeatedly take the shortest interval that
+ * still holds half the points. Avoids arbitrary histogram bin counts.
+ * @see https://en.wikipedia.org/wiki/Mode_(statistics)
+ * @param {number[]} values
+ * @returns {number}
+ */
+function calculateMode(values) {
+  const sorted = (values || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  if (!n) return NaN;
+  if (n === 1) return sorted[0];
+  if (n === 2) return (sorted[0] + sorted[1]) / 2;
+
+  let lo = 0;
+  let hi = n - 1;
+
+  while (hi - lo + 1 >= 4) {
+    const len = hi - lo + 1;
+    const half = Math.ceil(len / 2);
+    let best = lo;
+    let bestWidth = sorted[lo + half - 1] - sorted[lo];
+    for (let i = lo + 1; i <= hi - half + 1; i++) {
+      const width = sorted[i + half - 1] - sorted[i];
+      if (width < bestWidth) {
+        bestWidth = width;
+        best = i;
+      }
+    }
+    lo = best;
+    hi = best + half - 1;
+  }
+
+  // 2 or 3 remaining points
+  if (hi === lo) return sorted[lo];
+  if (hi - lo === 1) return (sorted[lo] + sorted[hi]) / 2;
+
+  const leftGap = sorted[lo + 1] - sorted[lo];
+  const rightGap = sorted[hi] - sorted[lo + 1];
+  if (leftGap < rightGap) return (sorted[lo] + sorted[lo + 1]) / 2;
+  if (rightGap < leftGap) return (sorted[lo + 1] + sorted[hi]) / 2;
+  return sorted[lo + 1];
 }
 
 function collectFrametimeSeries(dataset) {
@@ -1076,6 +1123,7 @@ function resetStatsPanel() {
     if (thead) thead.innerHTML = '';
     if (tbody) tbody.innerHTML = '';
   }
+  syncStatsTablesSeparation();
 
   latestStatsExportState = null;
   window.latestStatsExportData = null;
@@ -1095,9 +1143,9 @@ function setStatsExportVisible(visible) {
  */
 function updateStatsTable() {
   const statsContent = document.getElementById('statistics');
-  const statDatasetSelect = document.getElementById('statDatasetSelect');
-  const selectedDatasetIndices = Array.from(statDatasetSelect.selectedOptions).map(opt => parseInt(opt.value));
-
+  const selectedDatasetIndices = (typeof window.getDatasetPickerIndices === 'function'
+    ? window.getDatasetPickerIndices('statDatasetSelect')
+    : []);
   const selectedDatasets = selectedDatasetIndices.map(idx => window.allDatasets[idx]).filter(Boolean);
   if (!selectedDatasets.length) {
     window.notify?.('Select at least one dataset to calculate statistics.', 'warning');
@@ -1224,6 +1272,7 @@ function updateStatsTable() {
   }
 
   renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState);
+  syncStatsTablesSeparation();
 
   try {
     exportState.datasets.forEach(entry => {
@@ -1248,6 +1297,24 @@ function updateStatsTable() {
  * Compact pivot table for aggregate frametime metrics - one row per metric,
  * one column per dataset (no empty stat columns).
  */
+function syncStatsTablesSeparation() {
+  const statsPage = document.getElementById('statistics');
+  const aggregateWrap = document.getElementById('statsAggregateWrap');
+  const mainWrap = document.getElementById('statsMainTableWrap');
+  const divider = document.getElementById('statsTablesDivider');
+
+  const aggregateVisible = !!(aggregateWrap && !aggregateWrap.classList.contains('hidden'));
+  const mainVisible = !!(mainWrap && !mainWrap.classList.contains('hidden')
+    && mainWrap.style.display !== 'none');
+  const bothVisible = aggregateVisible && mainVisible;
+
+  if (statsPage) statsPage.classList.toggle('stats-has-both-tables', bothVisible);
+  if (divider) {
+    divider.classList.toggle('hidden', !bothVisible);
+    divider.setAttribute('aria-hidden', bothVisible ? 'false' : 'true');
+  }
+}
+
 function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState = null) {
   const wrap = document.getElementById('statsAggregateWrap');
   const table = document.getElementById('statsAggregateTable');
@@ -1332,8 +1399,9 @@ function visualizeStatistics() {
   const canvas = document.getElementById('statsChart');
   if (!container || !canvas) return;
 
-  const statDatasetSelect = document.getElementById('statDatasetSelect');
-  const datasetIndices = Array.from(statDatasetSelect.selectedOptions).map(opt => parseInt(opt.value));
+  const datasetIndices = typeof window.getDatasetPickerIndices === 'function'
+    ? window.getDatasetPickerIndices('statDatasetSelect')
+    : [];
   if (!datasetIndices.length) {
     window.notify?.('Select datasets to visualize statistics', 'warning');
     return;
@@ -1391,6 +1459,7 @@ function getStatDisplayName(stat, metrics = []) {
     'min': 'Minimum',
     'avg': getAverageDisplayLabel(metrics),
     'median': 'Median',
+    'mode': 'Mode',
     'stdev': getStdevDisplayLabel(metrics),
     'p1': '1% Percentile',
     'p01': '0.1% Percentile',
@@ -1415,6 +1484,7 @@ function getStatDescription(stat) {
   const descriptions = {
     'avg': 'Mean value. Harmonic for FPS metrics, arithmetic for time-based metrics.',
     'median': 'Middle value after sorting the samples.',
+    'mode': 'Most common value: peak of the density for continuous data (half-sample mode), not raw value frequency.',
     'stdev': 'Sample standard deviation around the arithmetic mean. Not paired with harmonic Avg on FPS.',
     'p1': 'Tail percentile cutoff for the worst 1% of samples.',
     'p01': 'Tail percentile cutoff for the worst 0.1% of samples.',
@@ -1435,6 +1505,7 @@ window.calculateRMSSD = calculateRMSSD;
 window.calculateDistributionShape = calculateDistributionShape;
 window.calculateStatistics = calculateStatistics;
 window.calculatePercentile = calculatePercentile;
+window.calculateMode = calculateMode;
 window.calculateLagAutocorrelation = calculateLagAutocorrelation;
 window.calculateAutocorrelationCorrectedCI = calculateAutocorrelationCorrectedCI;
 window.renderReliabilityDiagnostics = renderReliabilityDiagnostics;

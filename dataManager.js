@@ -80,6 +80,7 @@ const STATS_DEFAULT_ACTIVE = new Set(CORE_METRICS);
 // Grouping for the Statistics sidebar metric chips.
 const STATS_METRIC_GROUPS = [
   { label: 'Frame timing', metrics: ['FPS', 'FrameTime'] },
+  { label: 'Distribution shape', metrics: ['Skewness', 'Kurtosis', 'Nonparametric_Skew'] },
   {
     label: 'Display pipeline',
     metrics: [
@@ -88,8 +89,7 @@ const STATS_METRIC_GROUPS = [
     ]
   },
   { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] },
-  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'] },
-  { label: 'Distribution shape', metrics: ['Skewness', 'Kurtosis', 'Nonparametric_Skew'] }
+  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'] }
 ];
 
 // global UI flag (default = basic mode)
@@ -781,13 +781,6 @@ function renderStatsMetricGroups(container, metrics) {
     const section = document.createElement('div');
     section.className = 'stats-metric-group';
 
-    const label = document.createElement('div');
-    label.className = 'stats-metric-group-label';
-    label.innerHTML = group.hint
-      ? `${group.label}<span class="stats-hint">${group.hint}</span>`
-      : group.label;
-    section.appendChild(label);
-
     const chips = document.createElement('div');
     chips.className = 'stats-metric-chips';
     groupMetrics.forEach(m => {
@@ -802,10 +795,6 @@ function renderStatsMetricGroups(container, metrics) {
   if (advanced.length) {
     const section = document.createElement('div');
     section.className = 'stats-metric-group';
-    const label = document.createElement('div');
-    label.className = 'stats-metric-group-label';
-    label.textContent = 'Advanced';
-    section.appendChild(label);
     const chips = document.createElement('div');
     chips.className = 'stats-metric-chips';
     advanced.forEach(m => chips.appendChild(makeChip(m)));
