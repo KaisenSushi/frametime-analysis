@@ -1,26 +1,24 @@
 document.addEventListener('DOMContentLoaded', () => {
   updateMetricDropdowns();
 
-  window.useValueX = false;
-  const useValueXChk = document.getElementById('useValueX');
-  if (useValueXChk) {
-    useValueXChk.addEventListener('change', () => {
-      window.useValueX = useValueXChk.checked;
+  const histogramAsPercentChk = document.getElementById('histogramAsPercent');
+  if (histogramAsPercentChk) {
+    histogramAsPercentChk.addEventListener('change', () => {
       if (window.mainChart &&
-          (window.currentChartType === 'line' || window.currentChartType === 'scatter') &&
-          typeof window.rebuildCurrentLineScatterDatasets === 'function') {
-        window.rebuildCurrentLineScatterDatasets();
-        window.renderChart(window.currentChartType, { incremental: true });
+          window.currentChartType === 'histogram' &&
+          typeof window.rebuildCurrentHistogramDatasets === 'function') {
+        window.rebuildCurrentHistogramDatasets();
+        window.renderChart('histogram', { incremental: true });
       }
     });
   }
 
-  // Advanced metrics toggle
+  // Advanced metrics toggle (shared across all tabs via sidebar footer)
   const advBtn = document.getElementById('toggleAdvancedBtn');
   if (advBtn) {
     advBtn.addEventListener('click', () => {
       window.showAdvancedMetrics = !window.showAdvancedMetrics;
-      advBtn.textContent = window.showAdvancedMetrics ? 'Advanced Metrics ON' : 'Advanced Metrics OFF';
+      advBtn.textContent = window.showAdvancedMetrics ? 'Advanced metrics ON' : 'Advanced metrics OFF';
       updateMetricDropdowns();
     });
   }
@@ -105,10 +103,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ?.addEventListener('click', () => window.copyStatsAsMarkdown?.());
   document.getElementById('downloadStatsJsonBtn')
     ?.addEventListener('click', () => window.downloadStatsAsJson?.());
-  document.getElementById('copyStatsMarkdownBtnMain')
-    ?.addEventListener('click', () => window.copyStatsAsMarkdown?.());
-  document.getElementById('downloadStatsJsonBtnMain')
-    ?.addEventListener('click', () => window.downloadStatsAsJson?.());
 
   setupStatsSidebarControls();
   setupVizChartTypeControls();
@@ -182,7 +176,8 @@ function populateAllDatasetSelects() {
   // Get all dataset selection dropdowns
   const selectors = [
     document.getElementById('datasetSelect'),
-    document.getElementById('statDatasetSelect')
+    document.getElementById('statDatasetSelect'),
+    document.getElementById('reliabilityDatasetSelect')
   ];
   
   // Clear and repopulate each select
@@ -207,10 +202,13 @@ function populateAllDatasetSelects() {
     
     // Restore previous selection(s) when possible.
     if (selector.multiple) {
-      // For the stats dataset picker, pre-select everything when nothing was
-      // previously chosen so newly uploaded datasets are ready to compute.
+      // Stats and Reliability pickers pre-select everything when nothing was
+      // previously chosen so newly uploaded datasets are ready to use.
       const hadSelection = currentValues.some(v => v !== '');
-      const autoSelectAll = selector.id === 'statDatasetSelect' && !hadSelection;
+      const autoSelectAll = (
+        selector.id === 'statDatasetSelect' ||
+        selector.id === 'reliabilityDatasetSelect'
+      ) && !hadSelection;
       Array.from(selector.options).forEach(option => {
         option.selected = autoSelectAll || currentValues.includes(option.value);
       });
@@ -236,16 +234,19 @@ function setupVizChartTypeControls() {
 function updateVizControlsForChartType() {
   const type = document.getElementById('chartTypeSelect')?.value;
   const isSummary = type === 'summarybar';
+  const isHistogram = type === 'histogram';
 
   document.getElementById('vizBarStatsPanel')?.classList.toggle('hidden', !isSummary);
   document.querySelector('.viz-color-row')?.classList.toggle('hidden', isSummary);
-  document.getElementById('useValueX')?.closest('.viz-check')?.classList.toggle('hidden', isSummary);
+  document.getElementById('histogramDensityWrap')?.classList.toggle('hidden', !isHistogram);
 
   const hint = document.querySelector('.viz-chart-hint');
   if (hint) {
     hint.textContent = isSummary
       ? 'Rounded bars with values shown on each bar. Pick stats above, then Build summary bar.'
-      : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.';
+      : isHistogram
+        ? 'Shared bins across overlays. Use “% of frames” when capture lengths differ.'
+        : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.';
   }
 
   const addBtn = document.getElementById('addToChartBtn');
@@ -254,24 +255,38 @@ function updateVizControlsForChartType() {
   }
 }
 
-// Wire the Statistics sidebar helper links (dataset select all/clear, metric presets).
+// Wire the Statistics / Reliability sidebar helper links.
 function setupStatsSidebarControls() {
-  const statDatasetSelect = document.getElementById('statDatasetSelect');
+  const wireMultiSelect = (selectId, selectAllId, clearId, onChange) => {
+    const select = document.getElementById(selectId);
+    const selectAllBtn = document.getElementById(selectAllId);
+    const clearSelBtn = document.getElementById(clearId);
+    if (selectAllBtn && select) {
+      selectAllBtn.addEventListener('click', () => {
+        Array.from(select.options).forEach(opt => (opt.selected = true));
+        onChange?.();
+      });
+    }
+    if (clearSelBtn && select) {
+      clearSelBtn.addEventListener('click', () => {
+        Array.from(select.options).forEach(opt => (opt.selected = false));
+        onChange?.();
+      });
+    }
+    if (select && onChange) {
+      select.addEventListener('change', onChange);
+    }
+  };
+
+  wireMultiSelect('statDatasetSelect', 'statsSelectAll', 'statsClearSel');
+  wireMultiSelect(
+    'reliabilityDatasetSelect',
+    'reliabilitySelectAll',
+    'reliabilityClearSel',
+    () => window.renderReliabilityPage?.()
+  );
+
   const metricGroup = document.getElementById('statMetricsGroup');
-
-  const selectAllBtn = document.getElementById('statsSelectAll');
-  if (selectAllBtn && statDatasetSelect) {
-    selectAllBtn.addEventListener('click', () => {
-      Array.from(statDatasetSelect.options).forEach(opt => (opt.selected = true));
-    });
-  }
-
-  const clearSelBtn = document.getElementById('statsClearSel');
-  if (clearSelBtn && statDatasetSelect) {
-    clearSelBtn.addEventListener('click', () => {
-      Array.from(statDatasetSelect.options).forEach(opt => (opt.selected = false));
-    });
-  }
 
   // Presets toggle metric chips: Core activates default metrics, All activates every chip.
   const setChips = (predicate) => {
@@ -342,6 +357,9 @@ function applyColorToSelectedDatasets() {
     const ds = window.allDatasets?.[i];
     if (ds) ds.color = colorInput.value;
   });
+  if (typeof window.syncLiveChartColors === 'function') {
+    window.syncLiveChartColors();
+  }
   if (typeof window.refreshDatasetLists === 'function') {
     window.refreshDatasetLists();
   }
@@ -453,3 +471,4 @@ function notify(msg, type = 'info') {
 
 // Export notify to the global scope
 window.notify = notify;
+window.populateAllDatasetSelects = populateAllDatasetSelects;
