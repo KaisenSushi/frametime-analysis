@@ -4,19 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Frame Timing Analyzer</title>
-  <link rel="stylesheet" href="style.css?v=20260715e" />
+  <link rel="stylesheet" href="style.css?v=20260716e" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.4/build/index.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js"></script>
 
-  <script src="dataManager.js?v=20260715e"></script>
-  <script src="statsManager.js?v=20260715e"></script>
-  <script src="chartManager.js?v=20260715e"></script>
-  <script src="reliabilityManager.js?v=20260715e"></script>
-  <script src="main.js?v=20260715e"></script>
+  <script src="dataManager.js?v=20260716e"></script>
+  <script src="statsManager.js?v=20260716e"></script>
+  <script src="chartManager.js?v=20260716e"></script>
+  <script src="reliabilityManager.js?v=20260716e"></script>
+  <script src="main.js?v=20260716e"></script>
 </head>
 
 <body>
@@ -84,18 +83,18 @@
                   <span>Summary statistics</span>
                 </div>
                 <div class="toggle-group compact" id="barStatGroup">
-                  <div class="toggle-button" data-stat="max">Max</div>
+                  <div class="toggle-button active" data-stat="max">Max</div>
                   <div class="toggle-button active" data-stat="avg">Avg</div>
-                  <div class="toggle-button" data-stat="min">Min</div>
-                  <div class="toggle-button active" data-stat="p1">1%ile</div>
+                  <div class="toggle-button active" data-stat="min">Min</div>
+                  <div class="toggle-button" data-stat="p1">1%ile</div>
                   <div class="toggle-button" data-stat="p01">0.1%ile</div>
                   <div class="toggle-button" data-stat="p001">0.01%ile</div>
                   <div class="toggle-button active" data-stat="low1">1% Low</div>
-                  <div class="toggle-button" data-stat="low01">0.1% Low</div>
-                  <div class="toggle-button" data-stat="low001">0.01% Low</div>
-                  <div class="toggle-button" data-stat="stdev">STDEV</div>
+                  <div class="toggle-button active" data-stat="low01">0.1% Low</div>
+                  <div class="toggle-button active" data-stat="low001">0.01% Low</div>
+                  <div class="toggle-button active" data-stat="stdev">STDEV</div>
                 </div>
-                <p class="viz-bar-hint">Pick any number of stats to compare across selected datasets.</p>
+                <p class="viz-bar-hint">Defaults match the Statistics tab.</p>
               </div>
 
               <div class="viz-field-row viz-color-row">
@@ -107,12 +106,10 @@
                 </div>
               </div>
 
-              <label class="checkbox-label viz-check" for="useValueX">
-                <input type="checkbox" id="useValueX" />
-                Time-based X axis
+              <label class="checkbox-label viz-check hidden" for="histogramAsPercent" id="histogramDensityWrap">
+                <input type="checkbox" id="histogramAsPercent" checked />
+                Show bins as % of frames
               </label>
-
-              <button id="toggleAdvancedBtn" class="secondary-button viz-full" type="button">Advanced metrics OFF</button>
 
               <div class="viz-actions">
                 <button id="addToChartBtn" class="accent-button" type="button">Add to chart</button>
@@ -159,28 +156,34 @@
                 <div class="toggle-button active" data-stat="low001">0.01% Low</div>
                 <div class="toggle-button active" data-stat="stdev">STDEV</div>
               </div>
-              <div id="statsExportActions" class="stats-export-actions hidden" aria-hidden="true">
-                <span>Export for analysis</span>
-                <div class="stats-export-buttons">
-                  <button id="copyStatsMarkdownBtn" class="secondary-button mini" type="button">Copy as Markdown</button>
-                  <button id="downloadStatsJsonBtn" class="secondary-button mini" type="button">Download as JSON</button>
-                </div>
-              </div>
               <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
             </div>
           </div>
 
           <div id="reliabilitySidebar" class="sidebar-panel reliability-sidebar hidden">
             <div class="viz-panel">
+              <div class="viz-panel-head">
+                <span>Datasets</span>
+                <div class="stats-link-row">
+                  <button type="button" class="stats-link" id="reliabilitySelectAll">Select all</button>
+                  <button type="button" class="stats-link" id="reliabilityClearSel">Clear</button>
+                </div>
+              </div>
+              <select id="reliabilityDatasetSelect" class="stats-dataset-select" multiple></select>
+            </div>
+
+            <div class="viz-panel">
               <div class="viz-panel-head"><span>CDF overlay</span></div>
               <label class="viz-field" for="reliabilityMetricSelect">Metric</label>
               <select id="reliabilityMetricSelect" class="viz-select"></select>
+              <p class="viz-bar-hint">Diagnostics use this same metric.</p>
               <button id="updateReliabilityBtn" class="accent-button reliability-update-btn" type="button">Update reliability</button>
             </div>
           </div>
         </div>
 
         <div class="sidebar-footer">
+          <button id="toggleAdvancedBtn" class="secondary-button advanced-metrics-toggle" type="button">Advanced metrics OFF</button>
           <a href="https://discord.gg/kaisenn" target="_blank" rel="noopener" class="nav-link-btn">
             <svg width="18" height="14" viewBox="0 0 71 55" fill="currentColor" aria-hidden="true">
               <path d="M60.1045 4.8978C55.5792 2.8214 50.7265 1.2916 45.6527 0.41542C45.5603 0.39851 45.468 0.440769 45.4204 0.525289C44.7963 1.6353 44.105 3.0834 43.6209 4.2216C38.1637 3.4046 32.7345 3.4046 27.3892 4.2216C26.905 3.0581 26.1886 1.6353 25.5617 0.525289C25.5141 0.443589 25.4218 0.40133 25.3294 0.41542C20.2584 1.2888 15.4057 2.8186 10.8776 4.8978C10.8384 4.9147 10.8048 4.9429 10.7825 4.9795C1.57795 18.7309 -0.943561 32.1443 0.293408 45.3914C0.299005 45.4562 0.335386 45.5182 0.385761 45.5576C6.45866 50.0174 12.3413 52.7249 18.1147 54.5195C18.2071 54.5477 18.305 54.5139 18.3638 54.4378C19.7295 52.5728 20.9469 50.6063 21.9907 48.5383C22.0523 48.4172 21.9935 48.2735 21.8676 48.2256C19.9366 47.4931 18.0979 46.6 16.3292 45.5858C16.1893 45.5041 16.1781 45.304 16.3068 45.2082C16.679 44.9293 17.0513 44.6391 17.4067 44.3461C17.471 44.2926 17.5606 44.2813 17.6362 44.3151C29.2558 49.6202 41.8354 49.6202 53.3179 44.3151C53.3935 44.2785 53.4831 44.2898 53.5502 44.3433C53.9057 44.6363 54.2779 44.9293 54.6529 45.2082C54.7816 45.304 54.7732 45.5041 54.6333 45.5858C52.8646 46.6197 51.0259 47.4931 49.0921 48.2228C48.9662 48.2707 48.9102 48.4172 48.9718 48.5383C50.038 50.6034 51.2554 52.5699 52.5959 54.435C52.6519 54.5139 52.7526 54.5477 52.845 54.5195C58.6464 52.7249 64.529 50.0174 70.6019 45.5576C70.6551 45.5182 70.6887 45.459 70.6943 45.3942C72.1747 30.0791 68.2147 16.7757 60.1968 4.9823C60.1772 4.9429 60.1437 4.9147 60.1045 4.8978ZM23.7259 37.3253C20.2276 37.3253 17.3451 34.1136 17.3451 30.1693C17.3451 26.225 20.1717 23.0133 23.7259 23.0133C27.308 23.0133 30.1626 26.2532 30.1066 30.1693C30.1066 34.1136 27.28 37.3253 23.7259 37.3253ZM47.3178 37.3253C43.8196 37.3253 40.9371 34.1136 40.9371 30.1693C40.9371 26.225 43.7636 23.0133 47.3178 23.0133C50.9 23.0133 53.7545 26.2532 53.6986 30.1693C53.6986 34.1136 50.9 37.3253 47.3178 37.3253Z"/>
@@ -195,9 +198,10 @@
           <div class="viz-toolbar">
             <ul id="datasetOrderList" class="dataset-order-list"></ul>
             <div class="viz-toolbar-controls">
+              <span id="chartStatusLine" class="chart-status-line" aria-live="polite"></span>
               <button id="resetZoomBtn" class="secondary-button mini" type="button">Reset zoom</button>
               <div class="chart-height-control">
-                <label for="chartHeight">H</label>
+                <label for="chartHeight">Height</label>
                 <input type="range" id="chartHeight" min="280" max="900" value="520" />
                 <span id="chartHeightValue">520px</span>
               </div>
@@ -223,8 +227,8 @@
             <div id="statsExportBanner" class="stats-export-banner hidden" aria-hidden="true">
               <span>Export for analysis</span>
               <div class="stats-export-buttons">
-                <button id="copyStatsMarkdownBtnMain" class="secondary-button mini" type="button">Copy as Markdown</button>
-                <button id="downloadStatsJsonBtnMain" class="secondary-button mini" type="button">Download as JSON</button>
+                <button id="copyStatsMarkdownBtn" class="secondary-button mini" type="button">Copy as Markdown</button>
+                <button id="downloadStatsJsonBtn" class="secondary-button mini" type="button">Download as JSON</button>
               </div>
             </div>
 
@@ -254,19 +258,20 @@
             <div class="reliability-chart-header">
               <div>
                 <h2>CDF overlay</h2>
-                <p>Overlapping lines = consistent results across runs. Spread-out lines = results vary run to run.</p>
+                <p>Overlap means runs match. Spread means run-to-run variance.</p>
               </div>
             </div>
+            <p id="reliabilitySkipNotice" class="viz-inline-warning hidden" role="status"></p>
             <div class="chart-container reliability-chart-container empty" id="reliabilityChartContainer">
               <canvas id="reliabilityChart"></canvas>
               <div class="empty-chart-message">
-                <p>Upload datasets to compare reliability</p>
+                <p>Select datasets in the sidebar to compare reliability</p>
               </div>
             </div>
           </div>
 
           <div class="reliability-diagnostics">
-            <h2>Dataset diagnostics</h2>
+            <h2 id="reliabilityDiagnosticsHeading">Dataset diagnostics</h2>
             <div id="reliabilityDiagnosticsContent" class="stats-diagnostics-grid"></div>
           </div>
         </section>

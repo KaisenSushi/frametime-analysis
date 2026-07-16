@@ -25,6 +25,61 @@ function assignDatasetColors() {
   });
 }
 
+/**
+ * Push current dataset.color onto any live Visualization chart series so a
+ * color change shows immediately without Clear / re-add.
+ */
+function syncLiveChartColors() {
+  if (!Array.isArray(window.chartDatasets) || !window.chartDatasets.length) return false;
+
+  let changed = false;
+  const chartType = window.currentChartType;
+
+  window.chartDatasets.forEach(cfg => {
+    if (Array.isArray(cfg.sourceDatasetIndices)) {
+      const colors = cfg.sourceDatasetIndices.map(i => {
+        const ds = window.allDatasets?.[i];
+        return ds?.color || getBenchmarkColor(i);
+      });
+      if (cfg.type === 'violin') {
+        cfg.borderColor = colors;
+        cfg.backgroundColor = colors.map(c => hexToRgba(c, 0.3));
+      } else if (cfg.type === 'boxplot') {
+        cfg.borderColor = colors;
+        cfg.backgroundColor = colors.map(c => hexToRgba(c, chartType === 'violin' ? 0.4 : 0.4));
+      }
+      changed = true;
+      return;
+    }
+
+    if (!Number.isInteger(cfg.sourceDatasetIndex)) return;
+    const ds = window.allDatasets?.[cfg.sourceDatasetIndex];
+    if (!ds?.color) return;
+    const color = ds.color;
+
+    if (cfg.qqRole === 'reference') {
+      cfg.borderColor = hexToRgba(color, 0.9);
+      cfg.backgroundColor = hexToRgba(color, 0.9);
+    } else if (cfg.qqRole === 'sample') {
+      cfg.borderColor = color;
+      cfg.backgroundColor = hexToRgba(color, 0.75);
+    } else if (chartType === 'histogram' || cfg.type === 'bar') {
+      cfg.borderColor = color;
+      cfg.backgroundColor = hexToRgba(color, 0.7);
+    } else {
+      cfg.borderColor = color;
+      cfg.backgroundColor = color;
+    }
+    changed = true;
+  });
+
+  if (changed && window.mainChart) {
+    window.mainChart.data.datasets = window.chartDatasets.slice();
+    window.mainChart.update('none');
+  }
+  return changed;
+}
+
 /** Frame-Time-Analysis style global Chart.js defaults */
 function initChartDefaults() {
   if (!window.Chart?.defaults) return;
@@ -38,18 +93,18 @@ function initChartDefaults() {
 
 initChartDefaults();
 
-/** CapFrameX / FTA-style summary bar stat colors */
+/** Summary-bar stat colors from the same family as BENCHMARK_COLORS (no red/green coding). */
 const BAR_STAT_DEFS = [
-  { key: 'max',    label: 'Max',       color: 'rgb(0,70,0)' },
-  { key: 'avg',    label: 'Avg',       color: 'rgb(0,140,0)' },
-  { key: 'min',    label: 'Min',       color: 'rgb(0,210,0)' },
-  { key: 'p1',     label: '1%ile',     color: 'rgb(0,0,70)' },
-  { key: 'p01',    label: '0.1%ile',   color: 'rgb(0,0,140)' },
-  { key: 'p001',   label: '0.01%ile',  color: 'rgb(0,0,210)' },
-  { key: 'low1',   label: '1% Low',    color: 'rgb(70,0,0)' },
-  { key: 'low01',  label: '0.1% Low',  color: 'rgb(140,0,0)' },
-  { key: 'low001', label: '0.01% Low', color: 'rgb(210,0,0)' },
-  { key: 'stdev',  label: 'STDEV',     color: 'rgb(140,140,140)' }
+  { key: 'max',    label: 'Max',       color: '#38bdf8' },
+  { key: 'avg',    label: 'Avg',       color: '#ff8c00' },
+  { key: 'min',    label: 'Min',       color: '#c084fc' },
+  { key: 'p1',     label: '1%ile',     color: '#fbbf24' },
+  { key: 'p01',    label: '0.1%ile',   color: '#2dd4bf' },
+  { key: 'p001',   label: '0.01%ile',  color: '#818cf8' },
+  { key: 'low1',   label: '1% Low',    color: '#f472b6' },
+  { key: 'low01',  label: '0.1% Low',  color: '#fb923c' },
+  { key: 'low001', label: '0.01% Low', color: '#60a5fa' },
+  { key: 'stdev',  label: 'STDEV',     color: '#a3a3a3' }
 ];
 
 const BAR_STAT_DEF_MAP = Object.fromEntries(BAR_STAT_DEFS.map(d => [d.key, d]));
@@ -224,33 +279,6 @@ function decimateLTTB(points, threshold) {
   return sampled;
 }
 
-/** Detect timestamp column once per dataset instead of scanning every row. */
-function getDatasetTimestampKey(dataset) {
-  if (dataset._timestampKey !== undefined) return dataset._timestampKey;
-
-  const sample = dataset.rows?.[0];
-  if (!sample) {
-    dataset._timestampKey = null;
-    return null;
-  }
-
-  for (const key of Object.keys(sample)) {
-    const lk = key.toLowerCase();
-    if (
-      lk === 'timestamp' ||
-      lk.includes('elapsed time') ||
-      lk.includes('timestamp (elapsed time in seconds)') ||
-      (lk.startsWith('time') && lk.includes('seconds'))
-    ) {
-      dataset._timestampKey = key;
-      return key;
-    }
-  }
-
-  dataset._timestampKey = null;
-  return null;
-}
-
 /** Cached numeric series for a metric - avoids re-reading every row on each add. */
 function getMetricSeries(dataset, metric) {
   if (!dataset._seriesCache) dataset._seriesCache = Object.create(null);
@@ -278,29 +306,22 @@ function sampleSeries(values, maxPoints) {
 
 /**
  * Builds (and caches) line/scatter points with optional LTTB decimation.
+ * X is always frame index (1..n of finite metric values).
  */
-function getLineScatterPoints(dataset, metric, useValueX) {
+function getLineScatterPoints(dataset, metric) {
   if (!dataset._pointCache) dataset._pointCache = Object.create(null);
-  const cacheKey = `${metric}:${useValueX ? 1 : 0}`;
+  const cacheKey = metric;
   if (dataset._pointCache[cacheKey]) return dataset._pointCache[cacheKey];
 
   const rows = dataset.rows || [];
-  const timestampKey = useValueX ? getDatasetTimestampKey(dataset) : null;
   const points = [];
   let frameIndex = 0;
 
   for (let i = 0; i < rows.length; i++) {
     const value = getMetricValue(rows[i], metric);
     if (!Number.isFinite(value)) continue;
-
     frameIndex++;
-    let xValue = frameIndex;
-    if (useValueX && timestampKey) {
-      const ts = parseFloat(rows[i][timestampKey]);
-      if (Number.isFinite(ts)) xValue = ts;
-    }
-
-    points.push({ x: xValue, y: value });
+    points.push({ x: frameIndex, y: value });
   }
 
   const totalPoints = points.length;
@@ -313,10 +334,10 @@ function getLineScatterPoints(dataset, metric, useValueX) {
   return result;
 }
 
-function buildLineScatterPoints(rows, metric, useValueX) {
+function buildLineScatterPoints(rows, metric) {
   // Legacy entry point - prefer getLineScatterPoints when dataset object is available.
-  const dataset = { rows, _pointCache: null, _timestampKey: undefined };
-  return getLineScatterPoints(dataset, metric, useValueX).points;
+  const dataset = { rows, _pointCache: null };
+  return getLineScatterPoints(dataset, metric).points;
 }
 
 /**
@@ -377,6 +398,18 @@ function buildHistogram(data, binEdges = {}) {
   return { labels, counts };
 }
 
+function isHistogramPercentMode() {
+  return Boolean(document.getElementById('histogramAsPercent')?.checked);
+}
+
+/** Convert raw bin counts to % of frames in that series. */
+function histogramCountsForDisplay(counts, asPercent) {
+  if (!asPercent) return counts.slice();
+  const total = counts.reduce((sum, c) => sum + c, 0);
+  if (total <= 0) return counts.map(() => 0);
+  return counts.map(c => (c / total) * 100);
+}
+
 /**
  * Shared histogram edges so overlaid datasets land in identical x-axis buckets.
  * binCount uses the largest dataset's n (sqrt rule) so the densest series is not
@@ -410,37 +443,47 @@ function computeSharedHistogramEdges(seriesList) {
 }
 
 /**
- * Rebuilds X/Y points for existing line/scatter datasets when Time-based X toggles.
- * Uses source metadata captured when datasets are added to the chart.
+ * Rebuild histogram series when switching between count and % of frames.
  */
-function rebuildCurrentLineScatterDatasets() {
+function rebuildCurrentHistogramDatasets() {
   if (!Array.isArray(window.chartDatasets) || !window.chartDatasets.length) return;
-  if (window.currentChartType !== 'line' && window.currentChartType !== 'scatter') return;
+  if (window.currentChartType !== 'histogram') return;
 
-  const useValueX = document.getElementById('useValueX')?.checked;
-
-  window.chartDatasets = window.chartDatasets.map(datasetCfg => {
-    const sourceDatasetIndex = datasetCfg.sourceDatasetIndex;
-    const sourceMetric = datasetCfg.sourceMetric;
-
-    if (!Number.isInteger(sourceDatasetIndex) || typeof sourceMetric !== 'string') {
-      return datasetCfg;
+  const asPercent = isHistogramPercentMode();
+  const metric = window.currentChartMetric;
+  const indices = [];
+  window.chartDatasets.forEach(cfg => {
+    if (Number.isInteger(cfg.sourceDatasetIndex) && !indices.includes(cfg.sourceDatasetIndex)) {
+      indices.push(cfg.sourceDatasetIndex);
     }
+  });
+  if (!indices.length || !metric) return;
 
-    const sourceDataset = window.allDatasets?.[sourceDatasetIndex];
-    if (!sourceDataset?.rows?.length) return datasetCfg;
+  const seriesForBins = [];
+  indices.forEach(idx => {
+    const ds = window.allDatasets?.[idx];
+    if (!ds?.rows?.length) return;
+    const vals = getMetricSeries(ds, metric);
+    if (vals.length) seriesForBins.push(vals);
+  });
+  const sharedEdges = computeSharedHistogramEdges(seriesForBins);
 
-    if (sourceDataset._pointCache) sourceDataset._pointCache = Object.create(null);
-    const { points, totalPoints, displayedPoints } = getLineScatterPoints(
-      sourceDataset, sourceMetric, useValueX
-    );
-    if (!points.length) return datasetCfg;
-
+  window.chartDatasets = indices.map(idx => {
+    const ds = window.allDatasets[idx];
+    const vals = getMetricSeries(ds, metric);
+    const bins = sharedEdges ? buildHistogram(vals, sharedEdges) : buildHistogram(vals);
+    const displayCounts = histogramCountsForDisplay(bins.counts, asPercent);
+    const seriesColor = ds.color || getBenchmarkColor(idx);
     return {
-      ...datasetCfg,
-      data: points,
-      totalPoints,
-      displayedPoints
+      label: ds.name,
+      data: displayCounts.map((c, i) => ({ x: bins.labels[i], y: c })),
+      type: 'bar',
+      backgroundColor: hexToRgba(seriesColor, 0.7),
+      borderColor: seriesColor,
+      borderWidth: 1,
+      sourceDatasetIndex: idx,
+      sourceMetric: metric,
+      histogramAsPercent: asPercent
     };
   });
 }
@@ -480,10 +523,13 @@ function buildQQPlot(data) {
   const sorted = data.filter(Number.isFinite).slice().sort((a, b) => a - b);
   if (sorted.length < 2) return null;
 
+  // Reference line uses full-series moments so it matches Statistics STDEV.
+  const mean = jStat.mean(sorted);
+  const std = jStat.stdev(sorted, true);
+
+  // Only the plotted points are thinned for performance.
   const sample = subsampleSorted(sorted, MAX_QQ_POINTS);
   const n = sample.length;
-  const mean = jStat.mean(sample);
-  const std = jStat.stdev(sample, true);
 
   const points = [];
   for (let i = 0; i < n; i++) {
@@ -508,7 +554,7 @@ function buildQQPlot(data) {
         { x: zMax, y: mean }
       ];
 
-  return { points, refLine, mean, std: safeStd };
+  return { points, refLine, mean, std: safeStd, totalPoints: sorted.length, plottedPoints: points.length };
 }
 
 function isQQReferenceDataset(dataset) {
@@ -602,13 +648,13 @@ function computeSeriesExtents(datasets) {
 
 function buildChartScales(chartType) {
   const scales = {};
-  const useValueX = document.getElementById('useValueX')?.checked;
-  const xTitle = useValueX ? 'Duration (s)' : 'Frame #';
+  const xTitle = 'Frame #';
   const yTitle = getYAxisLabel(window.currentChartMetric);
 
   if (chartType === 'histogram') {
+    const yTitle = isHistogramPercentMode() ? '% of frames' : 'Count';
     scales.x = { type: 'category', title: { display: true, text: 'Bin Range', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
-    scales.y = styleLinearAxis({}, 'Count');
+    scales.y = styleLinearAxis({}, yTitle);
   } else if (chartType === 'summarybar') {
     scales.x = styleLinearAxis({ min: 0, grid: { display: true } }, getYAxisLabel(window.currentChartMetric));
     scales.y = {
@@ -638,12 +684,10 @@ function buildChartScales(chartType) {
       scales.y.min = extents.yMin;
       scales.y.max = extents.yMax;
     }
-  } else if (chartType === 'boxplot') {
+  } else if (chartType === 'boxplot' || chartType === 'violin') {
+    // Both use horizontal layout: categories on Y, values on X.
     scales.y = { type: 'category', title: { display: true, text: 'Dataset', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { display: false } };
     scales.x = styleLinearAxis({ beginAtZero: false, grace: '10%' }, yTitle);
-  } else if (chartType === 'violin') {
-    scales.x = { type: 'category', title: { display: true, text: 'Dataset', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
-    scales.y = styleLinearAxis({ beginAtZero: false, grace: '10%' }, yTitle);
   } else {
     scales.x = styleLinearAxis({}, xTitle);
     scales.y = styleLinearAxis({}, yTitle);
@@ -693,6 +737,7 @@ function renderChart(chartType, opts = {}) {
     }
     window.mainChart.options.scales = buildChartScales(chartType);
     window.mainChart.update('none');
+    updateChartStatusLine();
     return;
   }
 
@@ -714,11 +759,7 @@ function renderChart(chartType, opts = {}) {
       animation: false,
       scales,
       plugins: {
-        decimation: (chartType === 'line' || chartType === 'scatter') ? {
-          enabled: true,
-          algorithm: 'lttb',
-          samples: 2000
-        } : false,
+        decimation: false,
         tooltip: {
           backgroundColor: 'rgba(30,30,30,0.95)',
           titleColor: CHART_TEXT,
@@ -811,13 +852,13 @@ function renderChart(chartType, opts = {}) {
     cfg.options.layout = { padding: { right: 48 } };
   }
 
-  if (chartType === 'boxplot') {
+  if (chartType === 'boxplot' || chartType === 'violin') {
     cfg.options.indexAxis = 'y';
   }
 
   if (chartType === 'violin' || chartType === 'boxplot') {
-    // For the horizontal boxplot the numeric values live on the x axis.
-    const valueAxis = chartType === 'boxplot' ? 'x' : 'y';
+    // Horizontal layout: numeric values live on the x axis.
+    const valueAxis = 'x';
 
     let minValue = Infinity;
     let maxValue = -Infinity;
@@ -850,6 +891,46 @@ function renderChart(chartType, opts = {}) {
     chartContainer.classList.add('empty');
     window.mainChart = null;
   }
+
+  updateChartStatusLine();
+}
+
+function updateChartStatusLine() {
+  const el = document.getElementById('chartStatusLine');
+  if (!el) return;
+
+  const datasets = window.chartDatasets || [];
+  if (!datasets.length || !window.currentChartType) {
+    el.textContent = '';
+    return;
+  }
+
+  if (window.currentChartType === 'qqplot') {
+    const sample = datasets.find(d => d.qqRole === 'sample' && d.qqTotalPoints);
+    if (sample?.qqTotalPoints && sample.qqPlottedPoints) {
+      el.textContent = `${sample.qqPlottedPoints.toLocaleString()} of ${sample.qqTotalPoints.toLocaleString()} plotted`;
+      return;
+    }
+  }
+
+  if (window.currentChartType === 'line' || window.currentChartType === 'scatter') {
+    let displayed = 0;
+    let total = 0;
+    datasets.forEach(d => {
+      if (Number.isFinite(d.displayedPoints)) displayed += d.displayedPoints;
+      if (Number.isFinite(d.totalPoints)) total += d.totalPoints;
+    });
+    if (total > 0 && displayed > 0 && displayed < total) {
+      el.textContent = `${displayed.toLocaleString()} of ${total.toLocaleString()} frames`;
+      return;
+    }
+    if (total > 0) {
+      el.textContent = `${total.toLocaleString()} frames`;
+      return;
+    }
+  }
+
+  el.textContent = '';
 }
 
 
@@ -864,8 +945,7 @@ function clearChart() {
     window.mainChart.destroy();
     window.mainChart = null;
   }
-  
-  // Show the empty state
+
   const chartContainer = document.getElementById('chartContainer');
   if (chartContainer) {
     chartContainer.classList.add('empty');
@@ -876,12 +956,12 @@ function clearChart() {
     datasetOrderList.innerHTML = '';
   }
 
+  updateChartStatusLine();
+
   const clearChartBtn = document.getElementById('clearChartBtn');
   if (clearChartBtn) {
     clearChartBtn.disabled = true;
   }
-
-  console.log("Chart cleared");
 }
 
 // helper to convert "#RRGGBB" → "rgba(r,g,b,a)"
@@ -986,7 +1066,8 @@ function addToChartCore() {
       backgroundColor: colors.map(c => hexToRgba(c, 0.3)),
       borderColor: colors,
       borderWidth: 1,
-      order: 2
+      order: 2,
+      sourceDatasetIndices: indices.slice()
     }, {
       label: `${metric} Quartiles`,
       type: 'boxplot',
@@ -996,7 +1077,8 @@ function addToChartCore() {
       borderWidth: 2,
       order: 1,
       barPercentage: 0.05,
-      categoryPercentage: 1.0
+      categoryPercentage: 1.0,
+      sourceDatasetIndices: indices.slice()
     }];
 
     renderChart('violin');
@@ -1020,7 +1102,8 @@ function addToChartCore() {
       data: groups,
       backgroundColor: colors.map(c => hexToRgba(c, 0.4)),
       borderColor: colors,
-      borderWidth: 2
+      borderWidth: 2,
+      sourceDatasetIndices: indices.slice()
     }];
 
     renderChart('boxplot');
@@ -1053,8 +1136,8 @@ function addToChartCore() {
     let cfg;
 
     if (chartType === 'line' || chartType === 'scatter') {
-      const useValueX = document.getElementById('useValueX')?.checked;
-      const { points, totalPoints, displayedPoints } = getLineScatterPoints(ds, metric, useValueX);
+      const seriesResult = getLineScatterPoints(ds, metric);
+      const { points, totalPoints, displayedPoints } = seriesResult;
       if (!points.length) return;
 
       const seriesColor = ds.color || getBenchmarkColor(idx);
@@ -1080,14 +1163,19 @@ function addToChartCore() {
       const bins = histogramSharedEdges
         ? buildHistogram(vals, histogramSharedEdges)
         : buildHistogram(vals);
+      const asPercent = isHistogramPercentMode();
+      const displayCounts = histogramCountsForDisplay(bins.counts, asPercent);
       const seriesColor = ds.color || getBenchmarkColor(idx);
       cfg = {
         label: ds.name,
-        data: bins.counts.map((c, i) => ({ x: bins.labels[i], y: c })),
+        data: displayCounts.map((c, i) => ({ x: bins.labels[i], y: c })),
         type: 'bar',
         backgroundColor: hexToRgba(seriesColor, 0.7),
         borderColor: seriesColor,
-        borderWidth: 1
+        borderWidth: 1,
+        sourceDatasetIndex: idx,
+        sourceMetric: metric,
+        histogramAsPercent: asPercent
       };
     } else if (chartType === 'qqplot') {
       const qqResult = buildQQPlot(vals);
@@ -1109,7 +1197,11 @@ function addToChartCore() {
         showLine: false,
         parsing: false,
         order: 2,
-        qqRole: 'sample'
+        qqRole: 'sample',
+        sourceDatasetIndex: idx,
+        sourceMetric: metric,
+        qqTotalPoints: qqResult.totalPoints,
+        qqPlottedPoints: qqResult.plottedPoints
       });
 
       cfg = {
@@ -1124,7 +1216,9 @@ function addToChartCore() {
         showLine: true,
         parsing: false,
         order: 1,
-        qqRole: 'reference'
+        qqRole: 'reference',
+        sourceDatasetIndex: idx,
+        sourceMetric: metric
       };
     }
 
@@ -1258,6 +1352,7 @@ function updateDatasetOrder () {
 
   orderList.innerHTML = '';
   orderList.appendChild(frag);
+  updateChartStatusLine();
 }
 
 
@@ -1393,7 +1488,8 @@ window.assignDatasetColors = assignDatasetColors;
 window.buildHistogram = buildHistogram;
 window.buildQQPlot = buildQQPlot;
 window.renderChart = renderChart;
-window.rebuildCurrentLineScatterDatasets = rebuildCurrentLineScatterDatasets;
+window.rebuildCurrentHistogramDatasets = rebuildCurrentHistogramDatasets;
+window.syncLiveChartColors = syncLiveChartColors;
 window.clearChart = clearChart;
 window.addToChart = addToChart;
 window.moveDataset = moveDataset;

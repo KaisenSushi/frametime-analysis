@@ -458,7 +458,7 @@ function handleFileUpload(e) {
 
 /**
  * Refreshes the displayed list of datasets and updates all <select> elements
- * that let users pick datasets in other tabs (Visualization, Statistics, Tests, etc.).
+ * that let users pick datasets in other tabs (Visualization, Statistics, Reliability, etc.).
  */
 /**
  * Removes a single dataset by index and refreshes dependent UI. Because charts
@@ -733,8 +733,8 @@ const STATS_CHIP_LABELS = {
   'Stepwise_Relative_SD': 'Stepwise Rel. SD',
   'Coefficient_of_Variation': 'CV (σ/μ)',
   'RMSSD': 'RMSSD',
-  'Skewness': 'Skewness',
-  'Kurtosis': 'Kurtosis',
+  'Skewness': 'Skewness (bias-corr.)',
+  'Kurtosis': 'Kurtosis (bias-corr.)',
   'Nonparametric_Skew': 'Nonparametric Skew'
 };
 
@@ -829,8 +829,8 @@ function getMetricDisplayName(metric) {
     'Stepwise_Relative_SD': 'Stepwise Relative SD',
     'Coefficient_of_Variation': 'Coefficient of Variation (σ/μ)',
     'RMSSD': 'RMSSD (ms)',
-    'Skewness': 'Skewness',
-    'Kurtosis': 'Excess Kurtosis',
+    'Skewness': 'Skewness (bias-corrected)',
+    'Kurtosis': 'Excess Kurtosis (bias-corrected)',
     'Nonparametric_Skew': 'Nonparametric Skew',
     'MsBetweenPresents': 'MsBetweenPresents (ms)',
     'MsBetweenDisplayChange': 'MsBetweenDisplayChange (ms)',
@@ -866,9 +866,9 @@ function getMetricDescription(metric) {
     'Stepwise_Relative_SD': 'Frame-to-frame relative variability. Lower is smoother.',
     'Coefficient_of_Variation': 'Stdev divided by mean of frametimes. Lower is more consistent.',
     'RMSSD': 'Root mean square of successive frametime differences (ms). Lower is smoother.',
-    'Skewness': 'Positive means a slow/spiky tail, negative means a fast-frame tail, and near zero is symmetric.',
-    'Kurtosis': 'Positive means more extreme outliers, while negative means fewer and milder outliers than normal.',
-    'Nonparametric_Skew': 'Robust skew with the same sign meaning as skewness, but less affected by single extreme spikes.'
+    'Skewness': 'Bias-corrected sample skewness (Excel SKEW / SciPy bias=False). Positive = slow/spiky tail. Negative = fast-frame tail.',
+    'Kurtosis': 'Bias-corrected excess kurtosis (Excel KURT / SciPy bias=False). Positive = heavier tails than normal.',
+    'Nonparametric_Skew': 'Robust skew. Same sign meaning as skewness, less moved by single spikes.'
   };
   return descriptions[metric] || '';
 }

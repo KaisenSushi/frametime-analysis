@@ -75,27 +75,48 @@ function calculateRMSSD(values) {
 }
 
 /**
- * Distribution-shape metrics based on the existing mean, median, and stdev
- * calculations used by the Statistics panel.
+ * Bias-corrected sample skewness / excess kurtosis (Excel SKEW / KURT,
+ * SciPy skew/kurtosis with bias=False), plus nonparametric skew.
  */
 function calculateDistributionShape(values) {
   const series = (values || []).filter(v => Number.isFinite(v) && v > 0);
-  if (series.length < 2) {
+  const n = series.length;
+  if (n < 2) {
     return { skewness: NaN, kurtosis: NaN, nonparametricSkew: NaN };
   }
 
-  const { avg: mean, median, stdev } = calculateStatistics(series, 'FrameTime');
+  const mean = series.reduce((sum, value) => sum + value, 0) / n;
+  const variance = series.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (n - 1);
+  const stdev = Math.sqrt(variance);
   if (!Number.isFinite(stdev) || stdev === 0) {
     return { skewness: NaN, kurtosis: NaN, nonparametricSkew: NaN };
   }
 
-  const n = series.length;
-  const thirdMoment = series.reduce((sum, value) => sum + (value - mean) ** 3, 0) / n;
-  const fourthMoment = series.reduce((sum, value) => sum + (value - mean) ** 4, 0) / n;
+  let sumZ3 = 0;
+  let sumZ4 = 0;
+  for (let i = 0; i < n; i++) {
+    const z = (series[i] - mean) / stdev;
+    sumZ3 += z ** 3;
+    sumZ4 += z ** 4;
+  }
+
+  // Excel SKEW / SciPy skew(bias=False)
+  const skewness = n >= 3
+    ? (n / ((n - 1) * (n - 2))) * sumZ3
+    : NaN;
+
+  // Excel KURT / SciPy kurtosis(bias=False, fisher=True). Excess kurtosis.
+  const kurtosis = n >= 4
+    ? (n * (n + 1) / ((n - 1) * (n - 2) * (n - 3))) * sumZ4
+      - (3 * (n - 1) ** 2) / ((n - 2) * (n - 3))
+    : NaN;
+
+  const sorted = series.slice().sort((a, b) => a - b);
+  const median = calculatePercentile(sorted, 50);
 
   return {
-    skewness: thirdMoment / (stdev ** 3),
-    kurtosis: fourthMoment / (stdev ** 4) - 3,
+    skewness,
+    kurtosis,
     nonparametricSkew: (mean - median) / stdev
   };
 }
@@ -335,9 +356,12 @@ function calculateStatistics(arr, metricName = '') {
       ? n / sorted.reduce((s, v) => s + 1 / v, 0)   // harmonic mean
       : sum / n;
 
+  // STDEV is always sample stdev around the arithmetic mean (never the harmonic
+  // Avg). Labels call this out for FPS so Avg and STDEV are not read as a pair.
+  const arithmeticMean = sum / n;
   const stdev = (typeof jStat?.stdev === 'function')
       ? jStat.stdev(sorted, true)
-      : Math.sqrt(sorted.reduce((s, v) => s + (v - avg) ** 2, 0) / (n - 1));
+      : Math.sqrt(sorted.reduce((s, v) => s + (v - arithmeticMean) ** 2, 0) / (n - 1));
 
   /* -------- percentiles (single‑frame cut‑off) --------------------- */
   const p1   = calculatePercentile(sorted,  isFpsMetric ? 1     : 99);
@@ -390,126 +414,6 @@ function calculatePercentile(sortedArr, percentile) {
 
   const w = idx - lower;               // linear interpolation weight
   return sortedArr[lower] * (1 - w) + sortedArr[upper] * w;
-}
-
-/**
- * Analyzes stuttering frames, defining a stutter as a frame 1.5x longer than median.
- * Returns the total stutter count, % of total, and avg severity beyond threshold.
- * @param {number[]} frametimes
- * @returns {{count:number, percentage:number, severity:number}}
- */
-function analyzeStuttering(frametimes) {
-  if (!frametimes.length) {
-    return { count: 0, percentage: 0, severity: 0 };
-  }
-  const sorted = [...frametimes].sort((a, b) => a - b);
-  const median = calculatePercentile(sorted, 50);
-  const stutterThreshold = median * 1.5;
-
-  let stutterCount = 0;
-  let totalSeverity = 0;
-
-  frametimes.forEach(ft => {
-    if (ft > stutterThreshold) {
-      stutterCount++;
-      totalSeverity += (ft - stutterThreshold) / median;
-    }
-  });
-
-  return {
-    count: stutterCount,
-    percentage: (stutterCount / frametimes.length) * 100,
-    severity: stutterCount > 0 ? (totalSeverity / stutterCount) : 0
-  };
-}
-
-/**
- * Analyzes frame pacing in a general, robust way using median-based statistics.
- * Works reliably across any framerate (30, 60, 144, 250, etc.) without bias.
- * 
- * @param {number[]} frametimes - Array of per-frame durations (ms)
- * @returns {{consistency:number, medianFrametime:number, madFrametime:number, 
- *            medianTransition:number, madTransition:number, badTransitions:Array}}
- */
-function analyzeFramePacing(frametimes) {
-  if (frametimes.length < 3) {
-    return {
-      consistency: 0,
-      medianFrametime: 0,
-      madFrametime: 0,
-      medianTransition: 0, 
-      madTransition: 0,
-      stdevTransition: 0, // keep for backward compatibility
-      avgTransition: 0,   // keep for backward compatibility
-      badTransitions: []
-    };
-  }
-
-  // 1. Calculate median frametime (robust measure of "typical" performance)
-  const sorted = [...frametimes].sort((a, b) => a - b);
-  const medianFT = calculatePercentile(sorted, 50);
-
-  // 2. Compute relative deviations: (|t - median| / median)
-  const relDeviations = frametimes.map(t => Math.abs(t - medianFT) / medianFT);
-
-  // 3. Get the median of these relative deviations
-  const medianRelDev = calculatePercentile([...relDeviations].sort((a, b) => a - b), 50);
-
-  // 4. Calculate MAD of the raw frametimes
-  const absDeviationsFromMedian = frametimes.map(t => Math.abs(t - medianFT));
-  const sortedDevs = [...absDeviationsFromMedian].sort((a, b) => a - b);
-  const madFT = calculatePercentile(sortedDevs, 50);
-
-  // 5. Compute consecutive diffs, then median + MAD for transitions
-  const diffs = [];
-  for (let i = 1; i < frametimes.length; i++) {
-    diffs.push(Math.abs(frametimes[i] - frametimes[i - 1]));
-  }
-  
-  const sortedDiffs = [...diffs].sort((a, b) => a - b);
-  const medianDiff = calculatePercentile(sortedDiffs, 50);
-  
-  const absDeviationsDiff = diffs.map(d => Math.abs(d - medianDiff));
-  const sortedDiffDevs = [...absDeviationsDiff].sort((a, b) => a - b);
-  const madDiff = calculatePercentile(sortedDiffDevs, 50);
-
-  // Also calculate standard stats for backward compatibility
-  const avgDiff = (typeof jStat !== 'undefined' && typeof jStat.mean === 'function')
-    ? jStat.mean(diffs)
-    : diffs.reduce((a, b) => a + b, 0) / diffs.length;
-  const stdevDiff = (typeof jStat !== 'undefined' && typeof jStat.stdev === 'function')
-    ? jStat.stdev(diffs, true)
-    : Math.sqrt(diffs.reduce((s, v) => s + (v - avgDiff) ** 2, 0) / (diffs.length - 1));
-
-  // 6. Define consistency as a function of medianRelDev
-  // Tuned with alpha parameter for sensitivity
-  const alpha = 3.0; 
-  let consistency = 100 * (1 - Math.min(1, alpha * medianRelDev));
-  consistency = Math.max(0, Math.min(100, consistency)); // clamp to [0, 100]
-
-  // 7. Identify large transitions if diff is > K * medianDiff
-  const K = 2.5;
-  const badTransitions = [];
-  diffs.forEach((diff, i) => {
-    if (diff > K * medianDiff) {
-      badTransitions.push({
-        index: i + 1,  // i+1 -> transition from frame i to frame i+1
-        value: diff,
-        ratio: diff / medianDiff  // keep same property name for compatibility
-      });
-    }
-  });
-
-  return {
-    consistency: Math.round(consistency * 100) / 100, // round to 2 decimal places
-    medianFrametime: medianFT,
-    madFrametime: madFT,
-    medianTransition: medianDiff,
-    madTransition: madDiff,
-    avgTransition: avgDiff,      // keep for backward compatibility
-    stdevTransition: stdevDiff,  // keep for backward compatibility
-    badTransitions
-  };
 }
 
 function collectFrametimeSeries(dataset) {
@@ -793,20 +697,42 @@ function renderAutocorrelationDiagnostics(container, frametimes) {
   container.appendChild(section);
 }
 
-function formatFrametimeInterval(interval) {
-  return `[${interval[0].toFixed(3)}, ${interval[1].toFixed(3)}] ms`;
+function formatMetricInterval(interval, metric) {
+  const lo = interval[0];
+  const hi = interval[1];
+  if (isFpsLikeMetric(metric || '')) {
+    return `[${lo.toFixed(2)}, ${hi.toFixed(2)}] FPS`;
+  }
+  if (!metric || metric === 'FrameTime' || /^Ms/i.test(metric) || /time|latency|ms/i.test(metric)) {
+    return `[${lo.toFixed(3)}, ${hi.toFixed(3)}] ms`;
+  }
+  return `[${lo.toFixed(3)}, ${hi.toFixed(3)}]`;
 }
 
-function renderConfidenceIntervalDiagnostics(container, frametimes) {
+function formatMetricMean(mean, metric) {
+  if (isFpsLikeMetric(metric || '')) {
+    return `Mean: ${mean.toFixed(2)} FPS`;
+  }
+  if (!metric || metric === 'FrameTime' || /^Ms/i.test(metric) || /time|latency|ms/i.test(metric)) {
+    return `Mean: ${mean.toFixed(3)} ms`;
+  }
+  return `Mean: ${mean.toFixed(3)}`;
+}
+
+function formatFrametimeInterval(interval) {
+  return formatMetricInterval(interval, 'FrameTime');
+}
+
+function renderConfidenceIntervalDiagnostics(container, series, metric = 'FrameTime') {
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
   section.appendChild(makeDiagnosticsElement('h4', '', 'Mean (95% CI)'));
 
-  const result = calculateAutocorrelationCorrectedCI(frametimes);
+  const result = calculateAutocorrelationCorrectedCI(series);
   if (!result) {
     section.appendChild(makeDiagnosticsElement(
       'p',
       'stats-diagnostic-explanation',
-      'Need at least two frames.'
+      'Need at least two samples.'
     ));
     container.appendChild(section);
     return;
@@ -815,26 +741,33 @@ function renderConfidenceIntervalDiagnostics(container, frametimes) {
   section.appendChild(makeDiagnosticsElement(
     'div',
     'stats-diagnostic-primary',
-    `Mean: ${result.mean.toFixed(3)} ms`
+    formatMetricMean(result.mean, metric)
   ));
 
   const ciGrid = makeDiagnosticsElement('div', 'stats-ci-grid');
   const naive = makeDiagnosticsElement('div', 'stats-ci-card');
   naive.append(
     makeDiagnosticsElement('span', 'stats-ci-label', 'raw'),
-    makeDiagnosticsElement('strong', 'stats-ci-value', formatFrametimeInterval(result.naive)),
+    makeDiagnosticsElement('strong', 'stats-ci-value', formatMetricInterval(result.naive, metric)),
     makeDiagnosticsElement('span', 'stats-ci-note', `n = ${result.n.toLocaleString()}`)
   );
 
   const corrected = makeDiagnosticsElement('div', 'stats-ci-card corrected');
+  const nEff = Math.round(result.effectiveN);
+  let correctedNote = `n_eff = ${nEff.toLocaleString()}`;
+  let correctedLabel = 'Adjusted (lag-1)';
+  if (result.effectiveN > result.n) {
+    correctedNote += ' · n_eff > n (tighter)';
+    corrected.title = 'Negative lag-1 raises n_eff above n, so this interval is tighter than raw.';
+  } else if (result.effectiveN < result.n) {
+    correctedNote += ' · n_eff < n (wider)';
+    corrected.title = 'Positive lag-1 lowers n_eff, so this interval is wider than raw.';
+  }
+
   corrected.append(
-    makeDiagnosticsElement('span', 'stats-ci-label', 'autocorr. corrected'),
-    makeDiagnosticsElement('strong', 'stats-ci-value', formatFrametimeInterval(result.corrected)),
-    makeDiagnosticsElement(
-      'span',
-      'stats-ci-note',
-      `n_eff = ${Math.round(result.effectiveN).toLocaleString()}`
-    )
+    makeDiagnosticsElement('span', 'stats-ci-label', correctedLabel),
+    makeDiagnosticsElement('strong', 'stats-ci-value', formatMetricInterval(result.corrected, metric)),
+    makeDiagnosticsElement('span', 'stats-ci-note', correctedNote)
   );
 
   ciGrid.append(naive, corrected);
@@ -842,13 +775,26 @@ function renderConfidenceIntervalDiagnostics(container, frametimes) {
   container.appendChild(section);
 }
 
-function renderReliabilityDiagnostics(selectedDatasets) {
+function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime') {
   const content = document.getElementById('reliabilityDiagnosticsContent');
   if (!content) return;
 
+  const metricLabel = typeof window.getMetricDisplayName === 'function'
+    ? window.getMetricDisplayName(metric)
+    : metric;
+
   content.innerHTML = '';
+
+  const heading = document.getElementById('reliabilityDiagnosticsHeading')
+    || document.querySelector('.reliability-diagnostics > h2');
+  if (heading) {
+    heading.textContent = `Dataset diagnostics (${metricLabel})`;
+  }
+
   selectedDatasets.forEach((dataset, index) => {
-    const frametimes = collectFrametimeSeries(dataset);
+    const series = typeof collectMetricValues === 'function'
+      ? collectMetricValues(dataset, metric)
+      : collectFrametimeSeries(dataset);
     const card = makeDiagnosticsElement('article', 'stats-diagnostics-card');
     card.style.setProperty('--stripe', getStatsDatasetColor(dataset, index));
 
@@ -858,21 +804,21 @@ function renderReliabilityDiagnostics(selectedDatasets) {
       makeDiagnosticsElement(
         'span',
         'stats-frame-count',
-        `${frametimes.length.toLocaleString()} frames`
+        `${series.length.toLocaleString()} samples`
       )
     );
     card.appendChild(header);
 
-    if (frametimes.length < 2) {
+    if (series.length < 2) {
       card.appendChild(makeDiagnosticsElement(
         'p',
         'stats-diagnostic-explanation',
-        'Need at least two frames.'
+        'Need at least two samples.'
       ));
     } else {
-      renderPercentileSupport(card, frametimes.length);
-      renderAutocorrelationDiagnostics(card, frametimes);
-      renderConfidenceIntervalDiagnostics(card, frametimes);
+      renderPercentileSupport(card, series.length);
+      renderAutocorrelationDiagnostics(card, series);
+      renderConfidenceIntervalDiagnostics(card, series, metric);
     }
 
     content.appendChild(card);
@@ -1137,12 +1083,10 @@ function resetStatsPanel() {
 }
 
 function setStatsExportVisible(visible) {
-  ['statsExportActions', 'statsExportBanner'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.classList.toggle('hidden', !visible);
-    el.setAttribute('aria-hidden', visible ? 'false' : 'true');
-  });
+  const el = document.getElementById('statsExportBanner');
+  if (!el) return;
+  el.classList.toggle('hidden', !visible);
+  el.setAttribute('aria-hidden', visible ? 'false' : 'true');
 }
 
 /**
@@ -1447,7 +1391,7 @@ function getStatDisplayName(stat, metrics = []) {
     'min': 'Minimum',
     'avg': getAverageDisplayLabel(metrics),
     'median': 'Median',
-    'stdev': 'Std Deviation',
+    'stdev': getStdevDisplayLabel(metrics),
     'p1': '1% Percentile',
     'p01': '0.1% Percentile',
     'p001': '0.01% Percentile',
@@ -1459,17 +1403,25 @@ function getStatDisplayName(stat, metrics = []) {
   return displayNames[stat] || stat;
 }
 
+function getStdevDisplayLabel(metrics = []) {
+  // When Avg is harmonic (FPS), STDEV still uses the arithmetic mean. Say so.
+  if (getAverageMeanKind(metrics) === 'harmonic' || getAverageMeanKind(metrics) === 'mixed') {
+    return 'STDEV (arith.)';
+  }
+  return 'STDEV';
+}
+
 function getStatDescription(stat) {
   const descriptions = {
-    'avg': 'Mean value; harmonic for FPS metrics and arithmetic for time-based metrics.',
+    'avg': 'Mean value. Harmonic for FPS metrics, arithmetic for time-based metrics.',
     'median': 'Middle value after sorting the samples.',
-    'stdev': 'Sample standard deviation showing how widely values vary around the mean.',
-    'p1': 'Tail percentile cutoff representing the worst 1% of samples.',
-    'p01': 'Tail percentile cutoff representing the worst 0.1% of samples.',
-    'p001': 'Tail percentile cutoff representing the worst 0.01% of samples.',
-    'low1': 'Average performance across the worst 1% of samples.',
-    'low01': 'Average performance across the worst 0.1% of samples.',
-    'low001': 'Average performance across the worst 0.01% of samples.'
+    'stdev': 'Sample standard deviation around the arithmetic mean. Not paired with harmonic Avg on FPS.',
+    'p1': 'Tail percentile cutoff for the worst 1% of samples.',
+    'p01': 'Tail percentile cutoff for the worst 0.1% of samples.',
+    'p001': 'Tail percentile cutoff for the worst 0.01% of samples.',
+    'low1': 'Average of the worst 1% of samples.',
+    'low01': 'Average of the worst 0.1% of samples.',
+    'low001': 'Average of the worst 0.01% of samples.'
   };
   return descriptions[stat] || '';
 }
@@ -1486,8 +1438,6 @@ window.calculatePercentile = calculatePercentile;
 window.calculateLagAutocorrelation = calculateLagAutocorrelation;
 window.calculateAutocorrelationCorrectedCI = calculateAutocorrelationCorrectedCI;
 window.renderReliabilityDiagnostics = renderReliabilityDiagnostics;
-window.analyzeStuttering = analyzeStuttering;
-window.analyzeFramePacing = analyzeFramePacing;
 window.updateStatsTable = updateStatsTable;
 window.resetStatsPanel = resetStatsPanel;
 window.formatStatValue = formatStatValue;

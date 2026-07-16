@@ -55,17 +55,50 @@ function collectReliabilityMetricValues(dataset, metric) {
     .filter(Number.isFinite);
 }
 
+function getSelectedReliabilityDatasets() {
+  const select = document.getElementById('reliabilityDatasetSelect');
+  const all = window.allDatasets || [];
+  if (!select) return all.slice();
+
+  const indices = Array.from(select.selectedOptions).map(opt => parseInt(opt.value, 10));
+  if (!indices.length) return [];
+
+  return indices
+    .filter(i => Number.isInteger(i) && i >= 0 && i < all.length)
+    .map(i => all[i]);
+}
+
+function setReliabilitySkipNotice(message) {
+  const el = document.getElementById('reliabilitySkipNotice');
+  if (!el) return;
+  if (!message) {
+    el.textContent = '';
+    el.classList.add('hidden');
+    return;
+  }
+  el.textContent = message;
+  el.classList.remove('hidden');
+}
+
 function renderReliabilityCdf(datasets, metric) {
   const canvas = document.getElementById('reliabilityChart');
   const container = document.getElementById('reliabilityChartContainer');
   if (!canvas || !container) return;
 
-  const chartDatasets = datasets.map((dataset, index) => {
+  const skipped = [];
+  const chartDatasets = [];
+
+  datasets.forEach((dataset, index) => {
     const values = collectReliabilityMetricValues(dataset, metric);
+    const cdf = buildEmpiricalCdf(values);
+    if (!cdf.length) {
+      skipped.push(dataset.name);
+      return;
+    }
     const color = getReliabilityDatasetColor(dataset, index);
-    return {
+    chartDatasets.push({
       label: dataset.name,
-      data: buildEmpiricalCdf(values),
+      data: cdf,
       borderColor: color,
       backgroundColor: color,
       borderWidth: 2,
@@ -73,19 +106,35 @@ function renderReliabilityCdf(datasets, metric) {
       pointHoverRadius: 3,
       showLine: true,
       stepped: 'after'
-    };
-  }).filter(dataset => dataset.data.length);
+    });
+  });
 
   if (reliabilityChart) {
     reliabilityChart.destroy();
     reliabilityChart = null;
   }
 
+  const metricLabel = getReliabilityMetricLabel(metric);
+  if (skipped.length) {
+    setReliabilitySkipNotice(
+      `Skipped (no finite ${metricLabel} values): ${skipped.join(', ')}`
+    );
+  } else {
+    setReliabilitySkipNotice('');
+  }
+
   const isEmpty = chartDatasets.length === 0;
   container.classList.toggle('empty', isEmpty);
-  if (isEmpty) return;
+  if (isEmpty) {
+    const emptyMsg = container.querySelector('.empty-chart-message p');
+    if (emptyMsg) {
+      emptyMsg.textContent = datasets.length
+        ? `No finite ${metricLabel} values in the selected datasets`
+        : 'Select datasets in the sidebar to compare reliability';
+    }
+    return;
+  }
 
-  const metricLabel = getReliabilityMetricLabel(metric);
   reliabilityChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { datasets: chartDatasets },
@@ -147,12 +196,12 @@ function renderReliabilityCdf(datasets, metric) {
 }
 
 function renderReliabilityPage() {
-  const datasets = window.allDatasets || [];
+  const datasets = getSelectedReliabilityDatasets();
   const metricSelect = document.getElementById('reliabilityMetricSelect');
   const metric = metricSelect?.value || 'FrameTime';
 
   renderReliabilityCdf(datasets, metric);
-  window.renderReliabilityDiagnostics?.(datasets);
+  window.renderReliabilityDiagnostics?.(datasets, metric);
 }
 
 function resetReliabilityPanel() {
@@ -162,8 +211,11 @@ function resetReliabilityPanel() {
   }
 
   document.getElementById('reliabilityChartContainer')?.classList.add('empty');
+  setReliabilitySkipNotice('');
   const diagnostics = document.getElementById('reliabilityDiagnosticsContent');
   if (diagnostics) diagnostics.innerHTML = '';
+  const heading = document.getElementById('reliabilityDiagnosticsHeading');
+  if (heading) heading.textContent = 'Dataset diagnostics';
 }
 
 window.buildEmpiricalCdf = buildEmpiricalCdf;
