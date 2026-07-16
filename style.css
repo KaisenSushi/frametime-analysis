@@ -1092,14 +1092,7 @@ button:active { transform: scale(0.98); }
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.stats-aggregate-desc {
-  margin: 0 0 10px;
-  font-size: 14px;
-  color: var(--text-muted);
-  line-height: 1.45;
+  margin-bottom: 10px;
 }
 
 .stats-aggregate-table-wrap {

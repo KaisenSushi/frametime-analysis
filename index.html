@@ -4,18 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Frame Timing Analyzer</title>
-  <link rel="stylesheet" href="style.css?v=20260716o" />
+  <link rel="stylesheet" href="style.css?v=20260716p" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.4/build/index.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js"></script>
 
-  <script src="dataManager.js?v=20260716o"></script>
-  <script src="statsManager.js?v=20260716o"></script>
-  <script src="chartManager.js?v=20260716o"></script>
-  <script src="reliabilityManager.js?v=20260716o"></script>
-  <script src="main.js?v=20260716o"></script>
+  <script src="dataManager.js?v=20260716p"></script>
+  <script src="statsManager.js?v=20260716p"></script>
+  <script src="chartManager.js?v=20260716p"></script>
+  <script src="reliabilityManager.js?v=20260716p"></script>
+  <script src="main.js?v=20260716p"></script>
 </head>
 
 <body>
@@ -234,16 +234,15 @@
             </div>
 
             <div class="stats-tables-stack">
-              <div id="statsAggregateWrap" class="stats-aggregate-wrap hidden">
-                <div class="stats-aggregate-title">Aggregate metrics</div>
-                <p class="stats-aggregate-desc">Single value per dataset (stability and distribution shape).</p>
-                <div class="table-wrap stats-aggregate-table-wrap">
-                  <table id="statsAggregateTable" class="stats-table stats-aggregate-table">
-                    <thead></thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
+            <div id="statsAggregateWrap" class="stats-aggregate-wrap hidden">
+              <div class="stats-aggregate-title">Aggregate metrics</div>
+              <div class="table-wrap stats-aggregate-table-wrap">
+                <table id="statsAggregateTable" class="stats-table stats-aggregate-table">
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
               </div>
+            </div>
 
               <div id="statsTablesDivider" class="stats-tables-divider hidden" role="separator" aria-hidden="true"></div>
 
