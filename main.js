@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.showAdvancedMetrics = !window.showAdvancedMetrics;
       advBtn.textContent = window.showAdvancedMetrics ? 'Advanced metrics ON' : 'Advanced metrics OFF';
       updateMetricDropdowns();
+      window.renderReliabilityPage?.();
     });
   }
 
@@ -112,8 +113,9 @@ document.addEventListener('DOMContentLoaded', () => {
   updateReliabilityBtn?.addEventListener('click', () => window.renderReliabilityPage?.());
   reliabilityMetricSelect?.addEventListener('change', () => window.renderReliabilityPage?.());
 
-  // 10. Toggle buttons
+  // 10. Toggle buttons (metric chips manage their own click handlers)
   document.querySelectorAll('.toggle-button').forEach(btn => {
+    if (btn.closest('#statMetricsGroup')) return;
     btn.addEventListener('click', () => btn.classList.toggle('active'));
   });
 
@@ -223,8 +225,8 @@ function populateAllDatasetSelects() {
 
       const input = document.createElement('input');
       input.type = 'checkbox';
-      input.value = String(id);
-      input.checked = autoSelectAll || currentValues.includes(String(id));
+      input.value = String(dataset.id ?? dataset.name ?? id);
+      input.checked = autoSelectAll || currentValues.includes(input.value);
 
       const name = document.createElement('span');
       name.textContent = dataset.name;
@@ -233,7 +235,13 @@ function populateAllDatasetSelects() {
       input.addEventListener('change', () => {
         label.classList.toggle('is-selected', input.checked);
         if (picker.id === 'reliabilityDatasetSelect') {
+          if (typeof window.updateMetricDropdowns === 'function') {
+            window.updateMetricDropdowns();
+          }
           window.renderReliabilityPage?.();
+        }
+        if (picker.id === 'statDatasetSelect' && typeof window.updateMetricDropdowns === 'function') {
+          window.updateMetricDropdowns();
         }
       });
 
@@ -256,9 +264,14 @@ function getDatasetPickerIndices(pickerOrId) {
   const picker = typeof pickerOrId === 'string'
     ? document.getElementById(pickerOrId)
     : pickerOrId;
-  return getDatasetPickerValues(picker)
-    .map(v => parseInt(v, 10))
-    .filter(Number.isInteger);
+  const selectedIds = new Set(getDatasetPickerValues(picker));
+  return (window.allDatasets || [])
+    .map((dataset, index) => ({ dataset, index }))
+    .filter(({ dataset, index }) => {
+      const stableId = String(dataset?.id ?? dataset?.name ?? index);
+      return selectedIds.has(stableId);
+    })
+    .map(({ index }) => index);
 }
 
 function setDatasetPickerAll(pickerOrId, selected) {
@@ -346,12 +359,17 @@ function setupStatsSidebarControls() {
     }
   };
 
-  wireDatasetPicker('statDatasetSelect', 'statsSelectAll', 'statsClearSel');
+  wireDatasetPicker('statDatasetSelect', 'statsSelectAll', 'statsClearSel', () => {
+    window.updateMetricDropdowns?.();
+  });
   wireDatasetPicker(
     'reliabilityDatasetSelect',
     'reliabilitySelectAll',
     'reliabilityClearSel',
-    () => window.renderReliabilityPage?.()
+    () => {
+      window.updateMetricDropdowns?.();
+      window.renderReliabilityPage?.();
+    }
   );
 
   const metricGroup = document.getElementById('statMetricsGroup');
@@ -409,6 +427,11 @@ function applyColorToSelectedDatasets() {
   if (!sel || !sel.selectedOptions.length) return;
   const color = colorInput.value.toLowerCase();
   const selectedIdx = Array.from(sel.selectedOptions).map(opt => +opt.value);
+  if (selectedIdx.length > 1) {
+    window.notify?.('Pick one dataset at a time when assigning a manual color, so colors stay unique.', 'warning');
+    syncColorPickerFromSelection();
+    return;
+  }
 
   // Every dataset must keep a unique color so they stay distinguishable across
   // the Visualization, Statistics and Reliability tabs.

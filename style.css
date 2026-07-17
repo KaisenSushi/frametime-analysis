@@ -1600,20 +1600,15 @@ button:active { transform: scale(0.98); }
 
 .stats-metric-groups {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.stats-metric-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.stats-metric-chips {
-  display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* Keep chip size stable when toggling active — font-weight changes reflow flex rows. */
+.stats-metric-groups .toggle-button,
+.stats-metric-groups .toggle-button.active {
+  flex: 0 0 auto;
+  font-weight: 500;
 }
 
 .toggle-group.compact {

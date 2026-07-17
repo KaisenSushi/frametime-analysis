@@ -37,13 +37,17 @@ function getReliabilityMetricLabel(metric) {
 
 function getReliabilityDatasetColor(dataset, index) {
   if (dataset?.color) return dataset.color;
+  const globalIndex = (window.allDatasets || []).findIndex(ds =>
+    (dataset?.id != null && ds.id === dataset.id) || ds.name === dataset.name
+  );
+  const colorIndex = globalIndex >= 0 ? globalIndex : index;
   if (typeof window.getBenchmarkColor === 'function') {
-    return window.getBenchmarkColor(index);
+    return window.getBenchmarkColor(colorIndex);
   }
   if (typeof window.getDatasetColor === 'function') {
-    return window.getDatasetColor(index);
+    return window.getDatasetColor(colorIndex);
   }
-  return `hsl(${(index * 67) % 360}, 70%, 55%)`;
+  return `hsl(${(colorIndex * 67) % 360}, 70%, 55%)`;
 }
 
 function collectReliabilityMetricValues(dataset, metric) {

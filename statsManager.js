@@ -354,7 +354,11 @@ function calculateStatistics(arr, metricName = '') {
 
   // FPS metrics use the harmonic mean; everything else uses the arithmetic mean.
   const avg = isFpsMetric
-      ? n / sorted.reduce((s, v) => s + 1 / v, 0)   // harmonic mean
+      ? (() => {
+          const positive = getPositiveValuesForHarmonicMean(sorted);
+          if (!positive.length) return NaN;
+          return positive.length / positive.reduce((s, v) => s + 1 / v, 0);
+        })()
       : sum / n;
 
   // STDEV is always sample stdev around the arithmetic mean (never the harmonic
@@ -481,13 +485,19 @@ function collectMetricValues(dataset, metric) {
     .filter(v => typeof v === 'number');
 }
 
+function getPositiveValuesForHarmonicMean(values) {
+  return (values || []).filter(v => Number.isFinite(v) && v > 0);
+}
+
 /**
  * Returns the harmonic mean for FPS metrics, arithmetic mean otherwise.
  */
 function averageForMetric(values, metric) {
   if (!values.length) return NaN;
   if (isFpsLikeMetric(metric)) {
-    return values.length / values.reduce((s, v) => s + 1 / v, 0);
+    const positive = getPositiveValuesForHarmonicMean(values);
+    if (!positive.length) return NaN;
+    return positive.length / positive.reduce((s, v) => s + 1 / v, 0);
   }
   return values.reduce((s, v) => s + v, 0) / values.length;
 }
@@ -874,16 +884,23 @@ function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime') {
 
 let latestStatsExportState = null;
 
-function buildExportReliabilityDiagnostics(dataset, selectedStats) {
-  const frametimes = collectFrametimeSeries(dataset);
-  const lag1 = calculateLagAutocorrelation(frametimes, 1);
-  const confidenceInterval = calculateAutocorrelationCorrectedCI(frametimes);
+function getMetricExportUnit(metric) {
+  if (metric === 'FPS' || metric === 'RenderedFPS' || metric === 'DisplayedFPS') return 'fps';
+  if (metric === 'FrameTime' || /^Ms/i.test(metric)) return 'ms';
+  if (metric.includes('Util')) return 'percent';
+  return 'value';
+}
+
+function buildExportReliabilityDiagnostics(dataset, selectedStats, metric = 'FrameTime') {
+  const series = collectMetricValues(dataset, metric);
+  const lag1 = calculateLagAutocorrelation(series, 1);
+  const confidenceInterval = calculateAutocorrelationCorrectedCI(series);
   const selectedStatSet = new Set(selectedStats);
   const percentileSupport = {};
 
   PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ key, label, fraction }) => {
     if (!selectedStatSet.has(key)) return;
-    const expectedFrames = frametimes.length * fraction;
+    const expectedFrames = series.length * fraction;
     const status = getPercentileSupportStatus(expectedFrames);
     percentileSupport[label] = {
       expectedTailFrameCount: expectedFrames,
@@ -892,15 +909,19 @@ function buildExportReliabilityDiagnostics(dataset, selectedStats) {
   });
 
   return {
-    basedOnMetric: 'Frame Time',
-    validFrametimeCount: frametimes.length,
+    basedOnMetric: typeof window.getMetricDisplayName === 'function'
+      ? window.getMetricDisplayName(metric)
+      : metric,
+    validSampleCount: series.length,
+    validFrametimeCount: series.length,
     lagOneAutocorrelationCoefficient: Number.isFinite(lag1) ? lag1 : null,
     autocorrelationInterpretation: interpretAutocorrelation(lag1),
     percentileSampleSupport: percentileSupport,
     autocorrelationCorrected95PercentConfidenceInterval: confidenceInterval
       ? {
-          lowerMilliseconds: confidenceInterval.corrected[0],
-          upperMilliseconds: confidenceInterval.corrected[1],
+          unit: getMetricExportUnit(metric),
+          lower: confidenceInterval.corrected[0],
+          upper: confidenceInterval.corrected[1],
           effectiveSampleSize: confidenceInterval.effectiveN
         }
       : null
@@ -996,7 +1017,7 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
           ? 'Value'
           : getStatDisplayName(stat, [metric]);
         return `${escapeMarkdown(statLabel)}: ${formatStatValue(metric, stat, value)}`;
-      }).join('<br>');
+      }).join('; ');
     });
     lines.push(`| ${escapeMarkdown(metricLabel)} | ${cells.join(' | ')} |`);
   });
@@ -1030,7 +1051,7 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
     const lag1 = diagnostics.lagOneAutocorrelationCoefficient;
     const lagText = Number.isFinite(lag1) ? lag1.toFixed(3) : 'N/A';
     lines.push(
-      `- **${escapeMarkdown(entry.dataset.name)}:** ${diagnostics.validFrametimeCount.toLocaleString()} valid frametimes; lag-1 autocorrelation ${lagText}. ${escapeMarkdown(diagnostics.autocorrelationInterpretation)}`
+      `- **${escapeMarkdown(entry.dataset.name)}:** ${diagnostics.validSampleCount.toLocaleString()} valid ${escapeMarkdown(diagnostics.basedOnMetric)} samples; lag-1 autocorrelation ${lagText}. ${escapeMarkdown(diagnostics.autocorrelationInterpretation)}`
     );
 
     Object.entries(diagnostics.percentileSampleSupport).forEach(([label, support]) => {
@@ -1163,7 +1184,11 @@ function updateStatsTable() {
 
   const selectedStats = Array.from(document.querySelectorAll('#statsTypeGroup .toggle-button.active'))
     .map(btn => btn.dataset.stat);
-  if (!selectedStats.length) {
+
+  const regularMetrics = selectedMetrics.filter(m => !isAggregateMetric(m));
+  const aggregateMetrics = selectedMetrics.filter(m => isAggregateMetric(m));
+
+  if (regularMetrics.length && !selectedStats.length) {
     window.notify?.('Select at least one statistic.', 'warning');
     resetStatsPanel();
     return;
@@ -1172,13 +1197,12 @@ function updateStatsTable() {
   statsContent.classList.remove('empty-stats');
   setStatsExportVisible(true);
 
-  const regularMetrics = selectedMetrics.filter(m => !isAggregateMetric(m));
-  const aggregateMetrics = selectedMetrics.filter(m => isAggregateMetric(m));
   const exportState = {
     generatedAt: new Date().toISOString(),
     metrics: selectedMetrics.slice(),
     regularMetrics: regularMetrics.slice(),
     aggregateMetrics: aggregateMetrics.slice(),
+    reliabilityMetric: document.getElementById('reliabilityMetricSelect')?.value || 'FrameTime',
     selectedStats: selectedStats.slice(),
     datasets: selectedDatasets.map(dataset => ({
       dataset,
@@ -1278,7 +1302,8 @@ function updateStatsTable() {
     exportState.datasets.forEach(entry => {
       entry.reliabilityDiagnostics = buildExportReliabilityDiagnostics(
         entry.dataset,
-        selectedStats
+        selectedStats,
+        exportState.reliabilityMetric
       );
     });
     latestStatsExportState = exportState;
@@ -1373,11 +1398,14 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
       cell.textContent = formatStatValue(metric, 'avg', value);
 
       if (selectedDatasets.length > 1 && Number.isFinite(value)) {
-        const finite = values.filter(Number.isFinite);
-        const best = Math.min(...finite);
-        const worst = Math.max(...finite);
-        if (value === best) cell.classList.add('dataset-better-value');
-        else if (value === worst) cell.classList.add('dataset-worse-value');
+        const useLowerIsBetter = !['Skewness', 'Kurtosis', 'Nonparametric_Skew'].includes(metric);
+        if (useLowerIsBetter) {
+          const finite = values.filter(Number.isFinite);
+          const best = Math.min(...finite);
+          const worst = Math.max(...finite);
+          if (value === best) cell.classList.add('dataset-better-value');
+          else if (value === worst) cell.classList.add('dataset-worse-value');
+        }
       }
 
       row.appendChild(cell);

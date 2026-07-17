@@ -1,5 +1,6 @@
 // We'll store multiple datasets in memory
 window.allDatasets = [];
+window.nextDatasetId = window.nextDatasetId || 1;
 
 /**
  * Clears all dataset data from memory and refreshes UI elements.
@@ -222,8 +223,12 @@ function parseCSV(text) {
       const obj  = {};
       headers.forEach((h,i)=>{
         const raw = vals[i]?.trim() ?? '';
+        if (raw === '') {
+          obj[h] = null;
+          return;
+        }
         const num = Number(raw);
-        obj[h] = Number.isFinite(num) ? num : raw || null;
+        obj[h] = Number.isFinite(num) ? num : raw;
       });
       normaliseRow(obj);
       return obj;
@@ -417,6 +422,9 @@ function handleFileUpload(e) {
         }
 
         const datasetObj = {
+          id: duplicate.action === 'replace'
+            ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
+            : window.nextDatasetId++,
           name: duplicate.name,
           rows: parsedRows
         };
@@ -474,8 +482,13 @@ function removeDataset(index) {
     window.clearChart();
   }
 
-  if (!window.allDatasets.length && typeof window.resetStatsPanel === 'function') {
-    window.resetStatsPanel();
+  if (!window.allDatasets.length) {
+    if (typeof window.resetStatsPanel === 'function') {
+      window.resetStatsPanel();
+    }
+    if (typeof window.resetReliabilityPanel === 'function') {
+      window.resetReliabilityPanel();
+    }
   }
 
   refreshDatasetLists();
@@ -565,79 +578,62 @@ function detectAvailableMetrics() {
 }
 
 /**
+ * Collect numeric/derived metric keys present in one dataset.
+ */
+function numericColumnsForDataset(ds) {
+  if (!ds?.rows?.length) return new Set();
+  const cols = Object.keys(ds.rows[0] || {});
+  const numeric = new Set();
+  cols.forEach(col => {
+    if (METRIC_BLACKLIST.has(col)) return;
+    for (let i = 0; i < Math.min(15, ds.rows.length); i++) {
+      const v = ds.rows[i][col];
+      if (v === null || v === '' || v === undefined) continue;
+      const num = Number(v);
+      if (Number.isFinite(num)) {
+        numeric.add(col);
+        break;
+      }
+    }
+  });
+  if (ds.rows.some(r => Number.isFinite(r.FrameTime))) numeric.add('FrameTime');
+  if (ds.rows.some(r => Number.isFinite(r.FPS))) numeric.add('FPS');
+
+  const hasPresents = ds.rows.some(r => getMetricValue(r, 'RenderedFPS') != null);
+  const hasDisplay = ds.rows.some(r => getMetricValue(r, 'DisplayedFPS') != null);
+  const hasGpuBusy = ds.rows.some(r => getMetricValue(r, 'MsGPUBusy') != null);
+  const hasUntilDisplayed = ds.rows.some(r => getMetricValue(r, 'MsUntilDisplayed') != null);
+  const hasFrametimes = ds.rows.some(r => Number.isFinite(r.FrameTime) && r.FrameTime > 0);
+
+  if (hasPresents) numeric.add('RenderedFPS');
+  if (hasDisplay) numeric.add('DisplayedFPS');
+  if (hasGpuBusy) numeric.add('MsGPUBusy');
+  if (hasUntilDisplayed) numeric.add('MsUntilDisplayed');
+  if (hasFrametimes) {
+    FRAMETIME_DERIVED_METRICS.forEach(m => numeric.add(m));
+  }
+
+  return numeric;
+}
+
+/**
  * Build metric list based on selected datasets.
  * - If no dataset selected: union of all numeric columns (still respects basic vs advanced).
  * - If ≥1 selected: intersection of numeric columns across them.
- * - Always ensure FrameTime / FPS present if derivable.
  */
-function updateMetricDropdowns() {
-  const metricSelects = [
-    document.getElementById('metricSelect'),
-    document.getElementById('reliabilityMetricSelect')
-  ];
-  const statsMetricGroup = document.getElementById('statMetricsGroup');
-  const dsSelect = document.getElementById('datasetSelect');
-
-  // Helper: collect numeric columns from a dataset (looking across a few rows)
-  function numericColumns(ds) {
-    if (!ds?.rows?.length) return new Set();
-    const cols = Object.keys(ds.rows[0] || {});
-    const numeric = new Set();
-    cols.forEach(col => {
-      // skip blacklisted
-      if (METRIC_BLACKLIST.has(col)) return;
-      // probe up to first 15 rows to see if any numeric value appears
-      for (let i = 0; i < Math.min(15, ds.rows.length); i++) {
-        const v = ds.rows[i][col];
-        if (v === null || v === '' || v === undefined) continue;
-        const num = Number(v);
-        if (Number.isFinite(num)) {
-          numeric.add(col);
-          break;
-        }
-      }
-    });
-    // Make sure FrameTime / FPS appear if derived
-    if (ds.rows.some(r => Number.isFinite(r.FrameTime))) numeric.add('FrameTime');
-    if (ds.rows.some(r => Number.isFinite(r.FPS)))       numeric.add('FPS');
-
-    // Add derived metrics when source columns exist
-    const hasPresents = ds.rows.some(r => getMetricValue(r, 'RenderedFPS') != null);
-    const hasDisplay = ds.rows.some(r => getMetricValue(r, 'DisplayedFPS') != null);
-    const hasGpuBusy = ds.rows.some(r => getMetricValue(r, 'MsGPUBusy') != null);
-    const hasUntilDisplayed = ds.rows.some(r => getMetricValue(r, 'MsUntilDisplayed') != null);
-    const hasFrametimes = ds.rows.some(r => Number.isFinite(r.FrameTime) && r.FrameTime > 0);
-
-    if (hasPresents) numeric.add('RenderedFPS');
-    if (hasDisplay) numeric.add('DisplayedFPS');
-    if (hasGpuBusy) numeric.add('MsGPUBusy');
-    if (hasUntilDisplayed) numeric.add('MsUntilDisplayed');
-    if (hasFrametimes) {
-      FRAMETIME_DERIVED_METRICS.forEach(m => numeric.add(m));
-    }
-
-    return numeric;
-  }
-
-  // Determine selection
-  const selectedIdxs = dsSelect
-    ? Array.from(dsSelect.selectedOptions).map(o => +o.value)
-    : [];
-
+function computeAvailableMetrics(selectedIdxs) {
   let metrics;
 
   if (!selectedIdxs.length) {
-    // UNION
     const union = new Set();
     (window.allDatasets || []).forEach(ds => {
-      numericColumns(ds).forEach(c => union.add(c));
+      numericColumnsForDataset(ds).forEach(c => union.add(c));
     });
     metrics = Array.from(union);
   } else {
-    // INTERSECTION
     let inter = null;
     selectedIdxs.forEach(idx => {
-      const cols = numericColumns(window.allDatasets[idx]);
+      const cols = numericColumnsForDataset(window.allDatasets[idx]);
       if (inter == null) {
         inter = new Set(cols);
       } else {
@@ -647,85 +643,86 @@ function updateMetricDropdowns() {
     metrics = inter ? Array.from(inter) : [];
   }
 
-  // Basic vs advanced mode
+  const pool = selectedIdxs.length
+    ? selectedIdxs.map(idx => window.allDatasets[idx]).filter(Boolean)
+    : (window.allDatasets || []);
+
   if (!window.showAdvancedMetrics) {
     metrics = metrics.filter(m => CORE_METRICS.includes(m));
     if (!metrics.length) {
       metrics = ['FrameTime', 'FPS'].filter(m =>
-        (window.allDatasets || []).some(ds => ds.rows?.some(r => getMetricValue(r, m) != null))
+        pool.some(ds => ds.rows?.some(r => getMetricValue(r, m) != null))
       );
     }
   }
 
-  // Ensure derived metrics are included when advanced
-  DERIVED_METRICS.forEach(dm => {
-    if (!window.showAdvancedMetrics && ADVANCED_ONLY_METRICS.has(dm)) return;
-    const available = (window.allDatasets || []).some(ds =>
-      ds.rows?.length && (
-        FRAMETIME_DERIVED_METRICS.has(dm)
-          ? ds.rows.some(r => Number.isFinite(r.FrameTime))
-          : ds.rows.some(r => getMetricValue(r, dm) != null)
-      )
-    );
-    if (available && !metrics.includes(dm)) metrics.push(dm);
+  metrics.sort((a, b) => a.localeCompare(b));
+  return metrics;
+}
+
+function getTabDatasetIndices(tab) {
+  if (tab === 'stats' && typeof window.getDatasetPickerIndices === 'function') {
+    return window.getDatasetPickerIndices('statDatasetSelect');
+  }
+  if (tab === 'reliability' && typeof window.getDatasetPickerIndices === 'function') {
+    return window.getDatasetPickerIndices('reliabilityDatasetSelect');
+  }
+  const dsSelect = document.getElementById('datasetSelect');
+  return dsSelect ? Array.from(dsSelect.selectedOptions).map(o => +o.value) : [];
+}
+
+function populateMetricSelect(select, metrics, previousValue) {
+  if (!select) return;
+  select.innerHTML = '';
+  const selectMetrics = select.id === 'reliabilityMetricSelect'
+    ? metrics.filter(m => !FRAMETIME_DERIVED_METRICS.has(m))
+    : metrics;
+  selectMetrics.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = getMetricDisplayName(m);
+    select.appendChild(opt);
   });
+  const availableMetrics = Array.from(select.options).map(option => option.value);
+  if (previousValue && availableMetrics.includes(previousValue)) {
+    select.value = previousValue;
+  } else if (availableMetrics.includes('FrameTime')) {
+    select.value = 'FrameTime';
+  } else if (availableMetrics.includes('FPS')) {
+    select.value = 'FPS';
+  }
+  select.disabled = select.options.length === 0;
+}
 
-  // Sort alpha for stability
-  metrics.sort((a,b) => a.localeCompare(b));
+/**
+ * Build metric dropdowns/chips from each tab's active dataset selection.
+ */
+function updateMetricDropdowns() {
+  const metricSelect = document.getElementById('metricSelect');
+  const reliabilityMetricSelect = document.getElementById('reliabilityMetricSelect');
+  const statsMetricGroup = document.getElementById('statMetricsGroup');
 
-  // --- Populate dropdowns ---
-  const previousValues = metricSelects.map(sel => sel && sel.value);
+  const vizMetrics = computeAvailableMetrics(getTabDatasetIndices('viz'));
+  const statsMetrics = computeAvailableMetrics(getTabDatasetIndices('stats'));
+  const reliabilityMetrics = computeAvailableMetrics(getTabDatasetIndices('reliability'));
 
-  metricSelects.forEach(sel => {
-    if (!sel) return;
-    sel.innerHTML = '';
-    const selectMetrics = sel.id === 'reliabilityMetricSelect'
-      ? metrics.filter(m => !FRAMETIME_DERIVED_METRICS.has(m))
-      : metrics;
-    selectMetrics.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = getMetricDisplayName(m);
-      sel.appendChild(opt);
-    });
-  });
+  populateMetricSelect(metricSelect, vizMetrics, metricSelect?.value);
+  populateMetricSelect(reliabilityMetricSelect, reliabilityMetrics, reliabilityMetricSelect?.value);
 
-  // Try restore old selection
-  metricSelects.forEach((sel,i) => {
-    if (!sel) return;
-    const prev = previousValues[i];
-    const availableMetrics = Array.from(sel.options).map(option => option.value);
-    if (prev && availableMetrics.includes(prev)) {
-      sel.value = prev;
-    } else if (availableMetrics.includes('FrameTime')) {
-      sel.value = 'FrameTime';
-    } else if (availableMetrics.includes('FPS')) {
-      sel.value = 'FPS';
-    }
-  });
-
-  // Statistics tab grouped metric chips
   if (statsMetricGroup) {
-    renderStatsMetricGroups(statsMetricGroup, metrics);
+    renderStatsMetricGroups(statsMetricGroup, statsMetrics);
   }
 
-  // Disable selects if empty
-  metricSelects.forEach(sel => {
-    if (!sel) return;
-    sel.disabled = sel.options.length === 0;
-  });
-
-  if (metrics.length === 0 && selectedIdxs.length > 1) {
-    if (typeof window.notify === 'function') {
-      window.notify('No common numeric metrics across selected datasets.', 'warning');
-    }
+  const statsSelected = getTabDatasetIndices('stats');
+  if (statsMetrics.length === 0 && statsSelected.length > 1) {
+    window.notify?.('No common numeric metrics across selected datasets.', 'warning');
   }
 }
 
 // Short chip labels for the compact stats sidebar.
 const STATS_CHIP_LABELS = {
-  'FPS': 'FPS',
-  'FrameTime': 'Frame Time',
+  'FPS': 'FPS (Present)',
+  'FrameTime': 'Frame Time (Present)',
   'RenderedFPS': 'Rendered FPS',
   'DisplayedFPS': 'Displayed FPS',
   'MsGPUBusy': 'MsGPUBusy',
@@ -742,23 +739,49 @@ function getMetricChipLabel(metric) {
   return STATS_CHIP_LABELS[metric] || getMetricDisplayName(metric);
 }
 
+/** Flat list of metrics in the fixed chip display order (group order, then extras). */
+function getStatsChipDisplayOrder(availableMetrics) {
+  const available = new Set(availableMetrics);
+  const ordered = [];
+  const grouped = new Set();
+
+  STATS_METRIC_GROUPS.forEach(group => {
+    group.metrics.forEach(metric => {
+      if (!available.has(metric)) return;
+      ordered.push(metric);
+      grouped.add(metric);
+    });
+  });
+
+  availableMetrics.forEach(metric => {
+    if (!grouped.has(metric)) ordered.push(metric);
+  });
+
+  return ordered;
+}
+
 /**
  * Renders the Statistics sidebar metric chips grouped into labeled sections.
- * Metrics not covered by a named group land in an "Advanced" section.
+ * Chips always appear in STATS_METRIC_GROUPS order; toggling only changes .active.
  * @param {HTMLElement} container - #statMetricsGroup
  * @param {string[]} metrics - available metric keys
  */
 function renderStatsMetricGroups(container, metrics) {
+  const displayOrder = getStatsChipDisplayOrder(metrics);
+  const metricsKey = displayOrder.join('|');
+  if (container.dataset.metricsKey === metricsKey && container.querySelector('.toggle-button')) {
+    return;
+  }
+  container.dataset.metricsKey = metricsKey;
+
   const existingChips = container.querySelectorAll('.toggle-button');
   const previouslyActive = new Set(
     Array.from(existingChips).filter(b => b.classList.contains('active')).map(b => b.dataset.metric)
   );
-  // Apply default-active metrics until chips have actually been rendered once.
   const firstRender = existingChips.length === 0;
 
-  container.innerHTML = '';
+  container.replaceChildren();
 
-  const grouped = new Set();
   const makeChip = (metric) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -774,33 +797,9 @@ function renderStatsMetricGroups(container, metrics) {
     return btn;
   };
 
-  STATS_METRIC_GROUPS.forEach(group => {
-    const groupMetrics = group.metrics.filter(m => metrics.includes(m));
-    if (!groupMetrics.length) return;
-
-    const section = document.createElement('div');
-    section.className = 'stats-metric-group';
-
-    const chips = document.createElement('div');
-    chips.className = 'stats-metric-chips';
-    groupMetrics.forEach(m => {
-      grouped.add(m);
-      chips.appendChild(makeChip(m));
-    });
-    section.appendChild(chips);
-    container.appendChild(section);
+  displayOrder.forEach(metric => {
+    container.appendChild(makeChip(metric));
   });
-
-  const advanced = metrics.filter(m => !grouped.has(m));
-  if (advanced.length) {
-    const section = document.createElement('div');
-    section.className = 'stats-metric-group';
-    const chips = document.createElement('div');
-    chips.className = 'stats-metric-chips';
-    advanced.forEach(m => chips.appendChild(makeChip(m)));
-    section.appendChild(chips);
-    container.appendChild(section);
-  }
 
   window.updateStatsAverageLabel?.();
 }
@@ -811,8 +810,8 @@ function renderStatsMetricGroups(container, metrics) {
  */
 function getMetricDisplayName(metric) {
   const displayNames = {
-    'FrameTime': 'Frame Time (ms)',
-    'FPS': 'FPS',
+    'FrameTime': 'Frame Time (Present, ms)',
+    'FPS': 'FPS (Present / MsBetweenPresents)',
     'RenderedFPS': 'Rendered FPS (MsBetweenPresents)',
     'DisplayedFPS': 'Displayed FPS (MsBetweenDisplayChange)',
     'Stepwise_Relative_SD': 'Stepwise Relative SD',
@@ -846,8 +845,8 @@ function getMetricDisplayName(metric) {
  */
 function getMetricDescription(metric) {
   const descriptions = {
-    'FrameTime': 'Time between presented frames. Lower is smoother.',
-    'FPS': 'Frames per second (harmonic mean). Higher is better.',
+    'FrameTime': 'Time between app present calls (MsBetweenPresents). Not the same as display cadence — use Displayed FPS for on-screen timing.',
+    'FPS': 'Frames per second from present timing (MsBetweenPresents, harmonic mean). Not display-based — use Displayed FPS for what appears on screen.',
     'RenderedFPS': 'Frames the GPU submitted for presentation.',
     'DisplayedFPS': 'Frames actually shown on screen. Reveals smoothness loss.',
     'MsGPUBusy': 'GPU work time per frame. Key for input lag even at stable FPS.',

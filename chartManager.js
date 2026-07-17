@@ -294,14 +294,30 @@ function getMetricSeries(dataset, metric) {
   return values;
 }
 
-function sampleSeries(values, maxPoints) {
-  if (values.length <= maxPoints) return values;
-  const out = new Array(maxPoints);
-  const step = values.length / maxPoints;
+/** Evenly spaced indices from 0..length-1, always including first and last. */
+function sampleIndices(length, maxPoints) {
+  if (length <= maxPoints) {
+    return Array.from({ length }, (_, i) => i);
+  }
+  if (maxPoints <= 1) return [0];
+  const indices = new Array(maxPoints);
   for (let i = 0; i < maxPoints; i++) {
-    out[i] = values[Math.floor(i * step)];
+    indices[i] = Math.round(i * (length - 1) / (maxPoints - 1));
+  }
+  const seen = new Set();
+  const out = [];
+  for (const idx of indices) {
+    if (!seen.has(idx)) {
+      seen.add(idx);
+      out.push(idx);
+    }
   }
   return out;
+}
+
+function sampleSeries(values, maxPoints) {
+  if (values.length <= maxPoints) return values;
+  return sampleIndices(values.length, maxPoints).map(i => values[i]);
 }
 
 /**
@@ -494,17 +510,18 @@ function rebuildCurrentHistogramDatasets() {
  * @param {number} maxPoints
  * @returns {number[]}
  */
-function subsampleSorted(sorted, maxPoints) {
-  if (sorted.length <= maxPoints) return sorted;
-  const out = new Array(maxPoints);
-  for (let i = 0; i < maxPoints; i++) {
-    const idx = Math.min(
-      sorted.length - 1,
-      Math.floor((i * sorted.length) / maxPoints)
-    );
-    out[i] = sorted[idx];
+/**
+ * Subsample sorted values for plotting; each item keeps its 1-based rank in the full series.
+ * @returns {{ value: number, rank: number }[]}
+ */
+function subsampleSortedWithRanks(sorted, maxPoints) {
+  if (sorted.length <= maxPoints) {
+    return sorted.map((value, i) => ({ value, rank: i + 1 }));
   }
-  return out;
+  return sampleIndices(sorted.length, maxPoints).map(idx => ({
+    value: sorted[idx],
+    rank: idx + 1
+  }));
 }
 
 /**
@@ -527,16 +544,16 @@ function buildQQPlot(data) {
   const mean = jStat.mean(sorted);
   const std = jStat.stdev(sorted, true);
 
-  // Only the plotted points are thinned for performance.
-  const sample = subsampleSorted(sorted, MAX_QQ_POINTS);
-  const n = sample.length;
+  // Only the plotted points are thinned for performance; ranks use the full series size.
+  const nFull = sorted.length;
+  const sample = subsampleSortedWithRanks(sorted, MAX_QQ_POINTS);
 
   const points = [];
-  for (let i = 0; i < n; i++) {
-    const p = (i + 0.5) / n;
+  for (const { value, rank } of sample) {
+    const p = (rank - 0.5) / nFull;
     const z = jStat.normal.inv(p, 0, 1);
     if (!Number.isFinite(z)) continue;
-    points.push({ x: z, y: sample[i] });
+    points.push({ x: z, y: value });
   }
 
   if (points.length < 2) return null;
@@ -939,6 +956,7 @@ function updateChartStatusLine() {
  */
 function clearChart() {
   window.currentChartType = null;
+  window.currentChartMetric = '';
   window.chartLabels = [];
   window.chartDatasets.length = 0;
   if (window.mainChart) {
@@ -973,14 +991,153 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function getAddToChartButtonLabel() {
+  const chartTypeSelect = document.getElementById('chartTypeSelect')?.value;
+  const isSummary = window.currentChartType === 'summarybar' || chartTypeSelect === 'summarybar';
+  return isSummary ? 'Build summary bar' : 'Add to chart';
+}
+
 function setChartBusy(busy) {
   const btn = document.getElementById('addToChartBtn');
   const container = document.getElementById('chartContainer');
   if (btn) {
     btn.disabled = busy;
-    btn.textContent = busy ? 'Adding…' : 'Add to chart';
+    btn.textContent = busy ? 'Adding…' : getAddToChartButtonLabel();
   }
   container?.classList.toggle('chart-busy', busy);
+}
+
+function removeExistingSeriesForDataset(datasetIndex, metric) {
+  if (!Array.isArray(window.chartDatasets) || !window.chartDatasets.length) return;
+  window.chartDatasets = window.chartDatasets.filter(cfg => !(
+    cfg.sourceDatasetIndex === datasetIndex &&
+    cfg.sourceMetric === metric
+  ));
+}
+
+function getDistributionChartIndices() {
+  const cfg = (window.chartDatasets || []).find(d => Array.isArray(d.sourceDatasetIndices));
+  return cfg?.sourceDatasetIndices?.slice() || [];
+}
+
+function mergeDistributionIndices(existing, toAdd) {
+  let merged = existing.filter(i => !toAdd.includes(i));
+  return merged.concat(toAdd);
+}
+
+function rebuildDistributionChart(indices, metric, chartType) {
+  const labels = indices.map(i => window.allDatasets[i].name);
+  const groups = indices.map(i =>
+    sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
+  );
+  const colors = indices.map(i => window.allDatasets[i].color || getBenchmarkColor(i));
+
+  window.chartLabels = labels.slice();
+
+  if (chartType === 'violin') {
+    window.chartDatasets = [{
+      label: `${metric} Density`,
+      type: 'violin',
+      data: groups,
+      backgroundColor: colors.map(c => hexToRgba(c, 0.3)),
+      borderColor: colors,
+      borderWidth: 1,
+      order: 2,
+      sourceDatasetIndices: indices.slice(),
+      sourceMetric: metric
+    }, {
+      label: `${metric} Quartiles`,
+      type: 'boxplot',
+      data: groups,
+      backgroundColor: colors.map(() => 'rgba(80,80,80,0.4)'),
+      borderColor: colors.map(() => 'rgba(80,80,80,1)'),
+      borderWidth: 2,
+      order: 1,
+      barPercentage: 0.05,
+      categoryPercentage: 1.0,
+      sourceDatasetIndices: indices.slice(),
+      sourceMetric: metric
+    }];
+    return;
+  }
+
+  window.chartDatasets = [{
+    label: `${metric} Quartiles`,
+    type: 'boxplot',
+    data: groups,
+    backgroundColor: colors.map(c => hexToRgba(c, 0.4)),
+    borderColor: colors,
+    borderWidth: 2,
+    sourceDatasetIndices: indices.slice(),
+    sourceMetric: metric
+  }];
+}
+
+function getQQPairs() {
+  const pairs = [];
+  window.chartDatasets.forEach((dataset, chartIndex) => {
+    if (dataset.qqRole !== 'sample') return;
+    const refIndex = window.chartDatasets.findIndex(cfg =>
+      cfg.qqRole === 'reference' && cfg.sourceDatasetIndex === dataset.sourceDatasetIndex
+    );
+    const chartIndices = refIndex >= 0 ? [chartIndex, refIndex] : [chartIndex];
+    pairs.push({
+      label: dataset.label,
+      datasets: chartIndices.map(i => window.chartDatasets[i])
+    });
+  });
+  return pairs;
+}
+
+function setChartDatasetsFromQQPairs(pairs) {
+  window.chartDatasets = pairs.flatMap(pair => pair.datasets);
+}
+
+function getChartOrderEntries() {
+  const chartType = window.currentChartType;
+
+  if (chartType === 'violin' || chartType === 'boxplot') {
+    return getDistributionChartIndices().map((datasetIndex, orderIndex) => ({
+      kind: 'distribution',
+      orderIndex,
+      datasetIndex,
+      label: window.allDatasets[datasetIndex]?.name || `Dataset ${datasetIndex + 1}`
+    }));
+  }
+
+  if (chartType === 'qqplot') {
+    return getQQPairs().map((pair, orderIndex) => ({
+      kind: 'qq',
+      orderIndex,
+      chartIndices: pair.datasets.map((_, i) => i), // placeholder, not used after rebuild
+      label: pair.label,
+      pairIndex: orderIndex
+    }));
+  }
+
+  return (window.chartDatasets || []).map((dataset, chartIndex) => ({
+    kind: 'series',
+    orderIndex: chartIndex,
+    chartIndex,
+    label: dataset.label
+  }));
+}
+
+function swapChartDatasetsAt(a, b) {
+  if (a === b) return;
+  [window.chartDatasets[a], window.chartDatasets[b]] =
+    [window.chartDatasets[b], window.chartDatasets[a]];
+}
+
+function refreshChartAfterOrderChange() {
+  updateDatasetOrder();
+  if (!window.mainChart) return;
+
+  if (window.currentChartType === 'violin' || window.currentChartType === 'boxplot') {
+    window.mainChart.data.labels = window.chartLabels.slice();
+  }
+  window.mainChart.data.datasets = window.chartDatasets.slice();
+  window.mainChart.update('none');
 }
 
 /**
@@ -998,7 +1155,6 @@ function addToChartCore() {
 
   const metric    = document.getElementById('metricSelect').value;
   const chartType = document.getElementById('chartTypeSelect').value;
-  window.currentChartMetric = metric;
 
   if (typeof window.assignDatasetColors === 'function') {
     window.assignDatasetColors();
@@ -1028,6 +1184,7 @@ function addToChartCore() {
     }
 
     window.currentChartType = 'summarybar';
+    window.currentChartMetric = metric;
     buildSummaryBarChart(indices, metric, statKeys);
     renderChart('summarybar');
     updateDatasetOrder();
@@ -1039,6 +1196,7 @@ function addToChartCore() {
 
   if (!window.chartDatasets.length) {
     window.currentChartType = chartType;
+    window.currentChartMetric = metric;
   }
 
   if (window.chartDatasets.length && chartType !== window.currentChartType) {
@@ -1049,38 +1207,24 @@ function addToChartCore() {
     return;
   }
 
+  if (window.chartDatasets.length && metric !== window.currentChartMetric) {
+    window.notify?.(
+      `This chart is already using "${window.getMetricDisplayName?.(window.currentChartMetric) || window.currentChartMetric}". Clear it before adding "${window.getMetricDisplayName?.(metric) || metric}".`,
+      'warning'
+    );
+    return;
+  }
+
   // ---- VIOLIN + BOXPLOT COMBO ----
   if (chartType === 'violin') {
-    const labels = indices.map(i => window.allDatasets[i].name);
-    const groups = indices.map(i =>
-      sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
-    );
-    const colors = indices.map(i => window.allDatasets[i].color || getBenchmarkColor(i));
+    const existing = window.currentChartType === 'violin'
+      ? getDistributionChartIndices()
+      : [];
+    const allIndices = existing.length
+      ? mergeDistributionIndices(existing, indices)
+      : indices.slice();
 
-    window.chartLabels = labels.slice();
-
-    window.chartDatasets = [{
-      label: `${metric} Density`,
-      type: 'violin',
-      data: groups,
-      backgroundColor: colors.map(c => hexToRgba(c, 0.3)),
-      borderColor: colors,
-      borderWidth: 1,
-      order: 2,
-      sourceDatasetIndices: indices.slice()
-    }, {
-      label: `${metric} Quartiles`,
-      type: 'boxplot',
-      data: groups,
-      backgroundColor: colors.map(() => 'rgba(80,80,80,0.4)'),
-      borderColor: colors.map(() => 'rgba(80,80,80,1)'),
-      borderWidth: 2,
-      order: 1,
-      barPercentage: 0.05,
-      categoryPercentage: 1.0,
-      sourceDatasetIndices: indices.slice()
-    }];
-
+    rebuildDistributionChart(allIndices, metric, 'violin');
     renderChart('violin');
     updateDatasetOrder();
     document.getElementById('clearChartBtn')?.removeAttribute('disabled');
@@ -1089,23 +1233,14 @@ function addToChartCore() {
 
   // ---- BOXPLOT ONLY ----
   if (chartType === 'boxplot') {
-    const labels = indices.map(i => window.allDatasets[i].name);
-    const groups = indices.map(i =>
-      sampleSeries(getMetricSeries(window.allDatasets[i], metric), MAX_DISTRIBUTION_POINTS)
-    );
-    const colors = indices.map(i => window.allDatasets[i].color || getBenchmarkColor(i));
+    const existing = window.currentChartType === 'boxplot'
+      ? getDistributionChartIndices()
+      : [];
+    const allIndices = existing.length
+      ? mergeDistributionIndices(existing, indices)
+      : indices.slice();
 
-    window.chartLabels = labels.slice();
-    window.chartDatasets = [{
-      label: `${metric} Quartiles`,
-      type: 'boxplot',
-      data: groups,
-      backgroundColor: colors.map(c => hexToRgba(c, 0.4)),
-      borderColor: colors,
-      borderWidth: 2,
-      sourceDatasetIndices: indices.slice()
-    }];
-
+    rebuildDistributionChart(allIndices, metric, 'boxplot');
     renderChart('boxplot');
     updateDatasetOrder();
     document.getElementById('clearChartBtn')?.removeAttribute('disabled');
@@ -1129,6 +1264,7 @@ function addToChartCore() {
   indices.forEach(idx => {
     const ds = window.allDatasets[idx];
     if (!ds?.rows?.length) return;
+    removeExistingSeriesForDataset(idx, metric);
 
     const vals = getMetricSeries(ds, metric);
     if (!vals.length) return;
@@ -1260,44 +1396,77 @@ function addToChart() {
  * @param {number} index
  * @param {"up"|"down"} direction
  */
-function moveDataset(index, direction) {
-  if (direction === 'up' && index === 0) return;
-  if (direction === 'down' && index === window.chartDatasets.length - 1) return;
+function moveDataset(orderIndex, direction) {
+  const entries = getChartOrderEntries();
+  if (orderIndex < 0 || orderIndex >= entries.length) return;
+  if (direction === 'up' && orderIndex === 0) return;
+  if (direction === 'down' && orderIndex === entries.length - 1) return;
 
-  const newIndex = direction === 'up' ? index - 1 : index + 1;
-  [window.chartDatasets[index], window.chartDatasets[newIndex]] =
-    [window.chartDatasets[newIndex], window.chartDatasets[index]];
+  const swapWith = direction === 'up' ? orderIndex - 1 : orderIndex + 1;
+  const entry = entries[orderIndex];
+  const other = entries[swapWith];
 
-  updateDatasetOrder();
-  if (window.mainChart) {
-    window.mainChart.data.datasets = window.chartDatasets;
-    window.mainChart.update('none');
+  if (entry.kind === 'distribution' && other.kind === 'distribution') {
+    const indices = getDistributionChartIndices();
+    [indices[orderIndex], indices[swapWith]] = [indices[swapWith], indices[orderIndex]];
+    rebuildDistributionChart(indices, window.currentChartMetric, window.currentChartType);
+    refreshChartAfterOrderChange();
+    return;
+  }
+
+  if (entry.kind === 'qq' && other.kind === 'qq') {
+    const pairs = getQQPairs();
+    [pairs[orderIndex], pairs[swapWith]] = [pairs[swapWith], pairs[orderIndex]];
+    setChartDatasetsFromQQPairs(pairs);
+    refreshChartAfterOrderChange();
+    return;
+  }
+
+  if (entry.kind === 'series' && other.kind === 'series') {
+    swapChartDatasetsAt(entry.chartIndex, other.chartIndex);
+    refreshChartAfterOrderChange();
   }
 }
 
 /**
- * Removes a dataset from the chartDatasets array at the specified index
- * @param {number} index - The index of the dataset to remove
+ * Removes a dataset from the chart order list at the specified entry index.
+ * @param {number} orderIndex
  */
-function removeDataset(index) {
-  if (index < 0 || index >= window.chartDatasets.length) return;
-  
-  // Remove the dataset at the specified index
-  window.chartDatasets.splice(index, 1);
+function removeDataset(orderIndex) {
+  const entries = getChartOrderEntries();
+  const entry = entries[orderIndex];
+  if (!entry) return;
 
-  // If all datasets are removed, fully reset chart state.
-  if (window.chartDatasets.length === 0) {
-    clearChart();
+  if (entry.kind === 'distribution') {
+    const indices = getDistributionChartIndices().filter(i => i !== entry.datasetIndex);
+    if (!indices.length) {
+      clearChart();
+      return;
+    }
+    rebuildDistributionChart(indices, window.currentChartMetric, window.currentChartType);
+    refreshChartAfterOrderChange();
     return;
   }
-  
-  // Update the dataset order list
-  updateDatasetOrder();
-  
-  // Update the chart
-  if (window.mainChart) {
-    window.mainChart.data.datasets = window.chartDatasets;
-    window.mainChart.update('none');
+
+  if (entry.kind === 'qq') {
+    const pairs = getQQPairs();
+    pairs.splice(orderIndex, 1);
+    if (!pairs.length) {
+      clearChart();
+      return;
+    }
+    setChartDatasetsFromQQPairs(pairs);
+    refreshChartAfterOrderChange();
+    return;
+  }
+
+  if (entry.kind === 'series') {
+    window.chartDatasets.splice(entry.chartIndex, 1);
+    if (!window.chartDatasets.length) {
+      clearChart();
+      return;
+    }
+    refreshChartAfterOrderChange();
   }
 }
 
@@ -1310,25 +1479,34 @@ function updateDatasetOrder () {
   if (!orderList) return;
 
   const frag = document.createDocumentFragment();
+  const entries = getChartOrderEntries();
 
-  window.chartDatasets.forEach((dataset, index) => {
+  entries.forEach((entry, index) => {
+    const dataset = entry.kind === 'series'
+      ? window.chartDatasets[entry.chartIndex]
+      : entry.kind === 'qq'
+        ? getQQPairs()[entry.orderIndex]?.datasets[0]
+        : window.chartDatasets.find(d => Array.isArray(d.sourceDatasetIndices));
+
     const li = document.createElement('li');
     li.className      = 'dataset-order-item';
-    li.dataset.index  = index;               // keep the index on the node
+    li.dataset.index  = index;
 
-    /* small colour blob */
     const swatch = document.createElement('div');
     swatch.className = 'dataset-color';
-    swatch.style.background =
-      Array.isArray(dataset.backgroundColor)
-        ? dataset.backgroundColor[0]
-        : dataset.backgroundColor || '#888';
+    if (entry.kind === 'distribution') {
+      const ds = window.allDatasets[entry.datasetIndex];
+      swatch.style.background = ds?.color || getBenchmarkColor(entry.datasetIndex);
+    } else {
+      swatch.style.background =
+        Array.isArray(dataset?.backgroundColor)
+          ? dataset.backgroundColor[0]
+          : dataset?.backgroundColor || dataset?.borderColor || '#888';
+    }
 
-    /* label */
     const name = document.createElement('span');
-    name.textContent = dataset.label;
+    name.textContent = entry.label;
 
-    /* up / down / remove controls */
     const controls = document.createElement('div');
     controls.className = 'dataset-order-controls';
 
