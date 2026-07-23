@@ -128,12 +128,14 @@ function renderReliabilityCdf(datasets, metric) {
 
   const isEmpty = chartDatasets.length === 0;
   container.classList.toggle('empty', isEmpty);
+  canvas.setAttribute('aria-hidden', String(isEmpty));
   if (isEmpty) {
+    canvas.setAttribute('aria-label', 'Reliability cumulative distribution chart. Select datasets with finite values to compare runs.');
     const emptyMsg = container.querySelector('.empty-chart-message p');
     if (emptyMsg) {
       emptyMsg.textContent = datasets.length
         ? `No finite ${metricLabel} values in the selected datasets`
-        : 'Select datasets in the sidebar to compare reliability';
+        : 'Select datasets, then update reliability.';
     }
     return;
   }
@@ -160,6 +162,11 @@ function renderReliabilityCdf(datasets, metric) {
           }
         },
         tooltip: {
+          backgroundColor: 'rgba(10,10,10,0.96)',
+          titleColor: 'rgba(245,245,245,0.95)',
+          bodyColor: 'rgba(245,245,245,0.88)',
+          borderColor: 'rgba(255,255,255,0.28)',
+          borderWidth: 1,
           callbacks: {
             label(context) {
               const point = context.parsed;
@@ -176,7 +183,7 @@ function renderReliabilityCdf(datasets, metric) {
             text: metricLabel
           },
           grid: {
-            color: 'rgba(70,70,70,0.45)'
+            color: 'rgba(255,255,255,0.16)'
           }
         },
         y: {
@@ -190,18 +197,22 @@ function renderReliabilityCdf(datasets, metric) {
             callback: value => `${Math.round(value * 100)}%`
           },
           grid: {
-            color: 'rgba(70,70,70,0.45)'
+            color: 'rgba(255,255,255,0.16)'
           }
         }
       }
     }
   });
+  canvas.setAttribute(
+    'aria-label',
+    `Reliability cumulative distribution chart for ${metricLabel}. ${chartDatasets.length} datasets shown.`
+  );
 }
 
 function renderReliabilityPage() {
   const datasets = getSelectedReliabilityDatasets();
   const metricSelect = document.getElementById('reliabilityMetricSelect');
-  const metric = metricSelect?.value || 'FrameTime';
+  const metric = metricSelect?.value || 'RenderedFPS';
 
   renderReliabilityCdf(datasets, metric);
   window.renderReliabilityDiagnostics?.(datasets, metric);
@@ -214,6 +225,8 @@ function resetReliabilityPanel() {
   }
 
   document.getElementById('reliabilityChartContainer')?.classList.add('empty');
+  document.getElementById('reliabilityChart')
+    ?.setAttribute('aria-label', 'Reliability cumulative distribution chart. Select datasets to compare runs.');
   setReliabilitySkipNotice('');
   const diagnostics = document.getElementById('reliabilityDiagnosticsContent');
   if (diagnostics) diagnostics.innerHTML = '';
@@ -221,6 +234,11 @@ function resetReliabilityPanel() {
   if (heading) heading.textContent = 'Dataset diagnostics';
 }
 
+function exportReliabilityChartPng() {
+  window.exportChartPng?.(reliabilityChart, 'reliability-cdf');
+}
+
 window.buildEmpiricalCdf = buildEmpiricalCdf;
 window.renderReliabilityPage = renderReliabilityPage;
 window.resetReliabilityPanel = resetReliabilityPanel;
+window.exportReliabilityChartPng = exportReliabilityChartPng;

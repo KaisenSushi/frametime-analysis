@@ -1,4 +1,25 @@
+function setupTopbarHeightSync() {
+  const topbar = document.querySelector('.app-topbar');
+  if (!topbar) return;
+
+  const updateTopbarHeight = () => {
+    const height = Math.ceil(topbar.getBoundingClientRect().height);
+    if (height > 0) {
+      document.documentElement.style.setProperty('--topbar-height', `${height}px`);
+    }
+  };
+
+  updateTopbarHeight();
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(updateTopbarHeight);
+    observer.observe(topbar);
+  } else {
+    window.addEventListener('resize', updateTopbarHeight);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  setupTopbarHeightSync();
   updateMetricDropdowns();
 
   const histogramAsPercentChk = document.getElementById('histogramAsPercent');
@@ -19,31 +40,59 @@ document.addEventListener('DOMContentLoaded', () => {
     advBtn.addEventListener('click', () => {
       window.showAdvancedMetrics = !window.showAdvancedMetrics;
       advBtn.textContent = window.showAdvancedMetrics ? 'Advanced metrics ON' : 'Advanced metrics OFF';
+      advBtn.setAttribute('aria-pressed', String(window.showAdvancedMetrics));
       updateMetricDropdowns();
       window.renderReliabilityPage?.();
     });
   }
 
   // Sidebar navigation
-  const navItems = document.querySelectorAll('.nav-item');
+  const navItems = Array.from(document.querySelectorAll('.nav-item'));
   const tabContents = document.querySelectorAll('.tab-content');
   const sidebarPanels = document.querySelectorAll('.sidebar-panel');
-  navItems.forEach(item => {
-    item.addEventListener('click', () => {
-      navItems.forEach(n => n.classList.remove('active'));
-      tabContents.forEach(tc => tc.classList.add('hidden'));
-      sidebarPanels.forEach(sp => sp.classList.add('hidden'));
-
-      item.classList.add('active');
-      const tab = item.dataset.tab;
-      const target = document.getElementById(tab);
-      const sidebar = document.getElementById(tab + 'Sidebar');
-      if (target) target.classList.remove('hidden');
-      if (sidebar) sidebar.classList.remove('hidden');
-      if (tab === 'reliability') {
-        window.renderReliabilityPage?.();
-      }
+  const activateWorkspaceTab = (item, focusPanel = false) => {
+    if (!item) return;
+    navItems.forEach(n => {
+      const active = n === item;
+      n.classList.toggle('active', active);
+      n.setAttribute('aria-selected', String(active));
+      n.tabIndex = active ? 0 : -1;
     });
+    tabContents.forEach(tc => {
+      tc.classList.add('hidden');
+      tc.setAttribute('aria-hidden', 'true');
+    });
+    sidebarPanels.forEach(sp => sp.classList.add('hidden'));
+
+    const tab = item.dataset.tab;
+    const target = document.getElementById(tab);
+    const sidebar = document.getElementById(tab + 'Sidebar');
+    target?.classList.remove('hidden');
+    target?.setAttribute('aria-hidden', 'false');
+    sidebar?.classList.remove('hidden');
+    const title = document.getElementById('workspaceTitle');
+    if (title) title.textContent = item.textContent.trim();
+    if (tab === 'reliability') window.renderReliabilityPage?.();
+    if (focusPanel) target?.focus({ preventScroll: true });
+  };
+
+  navItems.forEach((item, index) => {
+    item.addEventListener('click', () => activateWorkspaceTab(item, true));
+    item.addEventListener('keydown', event => {
+      let nextIndex = null;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % navItems.length;
+      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + navItems.length) % navItems.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = navItems.length - 1;
+      if (nextIndex === null) return;
+      event.preventDefault();
+      activateWorkspaceTab(navItems[nextIndex]);
+      navItems[nextIndex].focus();
+    });
+  });
+  document.querySelector('.brand-block')?.addEventListener('click', event => {
+    event.preventDefault();
+    activateWorkspaceTab(navItems.find(item => item.dataset.tab === 'visualization'), true);
   });
 
   // 3. File input handling
@@ -71,16 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
     clearChartBtn.disabled = true;  // initially disabled until user adds a dataset
   }
 
-  // 6. Palette color for selected dataset(s)
-  const randomColorBtn = document.getElementById('randomColorBtn');
-  if (randomColorBtn) {
-    randomColorBtn.addEventListener('click', () => {
-      const colorSelect = document.getElementById('colorSelect');
-      if (!colorSelect) return;
-      colorSelect.value = pickUnusedColor();
-      applyColorToSelectedDatasets();
-    });
-  }
+  // 6. Dataset color swatch + popover
+  setupColorPicker();
 
   // 7. Chart height range
   const chartHeightRange = document.getElementById('chartHeight');
@@ -94,6 +135,12 @@ document.addEventListener('DOMContentLoaded', () => {
     resetZoomBtn.addEventListener('click', resetChartZoom);
   }
 
+  document.getElementById('exportChartPngBtn')
+    ?.addEventListener('click', () => window.exportChartPng?.(window.mainChart, 'frame-timing-chart'));
+
+  document.getElementById('exportReliabilityPngBtn')
+    ?.addEventListener('click', () => window.exportReliabilityChartPng?.());
+
   // 9. Statistics
   const calcStatsBtn = document.getElementById('calculateStatsBtn');
   if (calcStatsBtn) {
@@ -104,30 +151,42 @@ document.addEventListener('DOMContentLoaded', () => {
     ?.addEventListener('click', () => window.copyStatsAsMarkdown?.());
   document.getElementById('downloadStatsJsonBtn')
     ?.addEventListener('click', () => window.downloadStatsAsJson?.());
+  document.getElementById('exportStatsPngBtn')
+    ?.addEventListener('click', () => window.exportStatsAsPng?.());
 
   setupStatsSidebarControls();
   setupVizChartTypeControls();
 
   const updateReliabilityBtn = document.getElementById('updateReliabilityBtn');
   const reliabilityMetricSelect = document.getElementById('reliabilityMetricSelect');
-  updateReliabilityBtn?.addEventListener('click', () => window.renderReliabilityPage?.());
+  updateReliabilityBtn?.addEventListener('click', () => {
+    const selectedCount = getDatasetPickerIndices('reliabilityDatasetSelect').length;
+    updateReliabilityBtn.disabled = true;
+    updateReliabilityBtn.setAttribute('aria-busy', 'true');
+    updateReliabilityBtn.textContent =
+      selectedCount === 1 ? 'Updating 1 dataset…' : `Updating ${selectedCount} datasets…`;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          window.renderReliabilityPage?.();
+        } finally {
+          updateReliabilityBtn.disabled = false;
+          updateReliabilityBtn.removeAttribute('aria-busy');
+          updateReliabilityBtn.textContent = 'Update reliability';
+        }
+      }, 0);
+    });
+  });
   reliabilityMetricSelect?.addEventListener('change', () => window.renderReliabilityPage?.());
 
   // 10. Toggle buttons (metric chips manage their own click handlers)
   document.querySelectorAll('.toggle-button').forEach(btn => {
     if (btn.closest('#statMetricsGroup')) return;
-    btn.addEventListener('click', () => btn.classList.toggle('active'));
+    btn.addEventListener('click', () => {
+      const active = btn.classList.toggle('active');
+      btn.setAttribute('aria-pressed', String(active));
+    });
   });
-
-  // 12. Color preview updates
-  const colorSelect = document.getElementById('colorSelect');
-  if (colorSelect) {
-    // Live drag only updates the swatch preview; the color is committed (and
-    // checked for duplicates) once the user finishes picking.
-    colorSelect.addEventListener('input', updateColorPreview);
-    colorSelect.addEventListener('change', applyColorToSelectedDatasets);
-    updateColorPreview();
-  }
 
   // 13. Initialize chart height
   if (chartHeightRange) {
@@ -141,7 +200,14 @@ document.addEventListener('DOMContentLoaded', () => {
       window.updateMetricDropdowns();
     }
     syncColorPickerFromSelection();
-    window.renderReliabilityPage?.();
+    const reliabilityPanel = document.getElementById('reliability');
+    const reliabilityNav = document.querySelector('.nav-item[data-tab="reliability"]');
+    if (
+      (reliabilityPanel && !reliabilityPanel.classList.contains('hidden')) ||
+      reliabilityNav?.classList.contains('active')
+    ) {
+      window.renderReliabilityPage?.();
+    }
   });
 
   // 17. Any other initialization logic you need
@@ -149,14 +215,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize dataset selects on page load
   populateAllDatasetSelects();
-
-  const datasetSelect = document.getElementById('datasetSelect');
-  if (datasetSelect) {
-    datasetSelect.addEventListener('change', () => {
-      updateMetricDropdowns();
-      syncColorPickerFromSelection();
-    });
-  }
 
   const chartContainer = document.getElementById('chartContainer');
   if (chartContainer) {
@@ -173,53 +231,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Populate all dataset selection dropdowns
+// Populate all dataset checkbox pickers.
 function populateAllDatasetSelects() {
-  const nativeSelectors = [
-    document.getElementById('datasetSelect')
-  ];
   const pickers = [
+    document.getElementById('datasetSelect'),
     document.getElementById('statDatasetSelect'),
     document.getElementById('reliabilityDatasetSelect')
   ];
 
-  nativeSelectors.forEach(selector => {
-    if (!selector) return;
-
-    const currentValues = selector.multiple
-      ? Array.from(selector.selectedOptions).map(option => option.value)
-      : [selector.value];
-
-    selector.innerHTML = '';
-
-    (window.allDatasets || []).forEach((dataset, id) => {
-      const option = document.createElement('option');
-      option.value = id;
-      option.textContent = dataset.name;
-      selector.appendChild(option);
-    });
-
-    if (selector.multiple) {
-      Array.from(selector.options).forEach(option => {
-        option.selected = currentValues.includes(option.value);
-      });
-      fitMultiSelectHeight(selector);
-    } else {
-      const currentValue = currentValues[0];
-      if (currentValue && selector.querySelector(`option[value="${currentValue}"]`)) {
-        selector.value = currentValue;
-      }
-    }
-  });
-
   pickers.forEach(picker => {
     if (!picker) return;
+    const datasets = window.allDatasets || [];
     const currentValues = getDatasetPickerValues(picker);
-    const hadSelection = currentValues.length > 0;
-    const autoSelectAll = !hadSelection;
+    const hasInitializedSelection = picker.dataset.selectionInitialized === 'true';
+    const autoSelectAll = !hasInitializedSelection && currentValues.length === 0;
+    const focusedCheckboxValue = document.activeElement instanceof HTMLInputElement &&
+      document.activeElement.type === 'checkbox' &&
+      picker.contains(document.activeElement)
+      ? document.activeElement.value
+      : null;
 
     picker.innerHTML = '';
-    (window.allDatasets || []).forEach((dataset, id) => {
+    datasets.forEach((dataset, id) => {
       const label = document.createElement('label');
       label.className = 'stats-dataset-option';
 
@@ -243,23 +276,38 @@ function populateAllDatasetSelects() {
         if (picker.id === 'statDatasetSelect' && typeof window.updateMetricDropdowns === 'function') {
           window.updateMetricDropdowns();
         }
+        if (picker.id === 'datasetSelect') {
+          window.updateMetricDropdowns?.();
+          syncColorPickerFromSelection();
+        }
       });
 
       label.appendChild(input);
       label.appendChild(name);
       picker.appendChild(label);
     });
+    if (datasets.length) {
+      picker.dataset.selectionInitialized = 'true';
+    } else {
+      delete picker.dataset.selectionInitialized;
+    }
+
+    if (focusedCheckboxValue !== null) {
+      Array.from(picker.querySelectorAll('input[type="checkbox"]'))
+        .find(input => input.value === focusedCheckboxValue)
+        ?.focus({ preventScroll: true });
+    }
   });
 }
 
-/** Selected values from a Stats/Reliability checkbox picker. */
+/** Selected stable IDs from a dataset checkbox picker. */
 function getDatasetPickerValues(picker) {
   if (!picker) return [];
   return Array.from(picker.querySelectorAll('input[type="checkbox"]:checked'))
     .map(input => input.value);
 }
 
-/** Selected dataset indices from a Stats/Reliability checkbox picker. */
+/** Selected dataset indices from a checkbox picker. */
 function getDatasetPickerIndices(pickerOrId) {
   const picker = typeof pickerOrId === 'string'
     ? document.getElementById(pickerOrId)
@@ -283,26 +331,6 @@ function setDatasetPickerAll(pickerOrId, selected) {
     input.checked = selected;
     input.closest('.stats-dataset-option')?.classList.toggle('is-selected', selected);
   });
-}
-
-/**
- * Native <select multiple> ignores content height in CSS; set height from
- * option count × row height, capped at max-height (120px).
- */
-function fitMultiSelectHeight(select) {
-  if (!select || !select.multiple) return;
-
-  const maxHeight = 120;
-  const rowHeight = 24;
-  const padding = 8;
-  const count = select.options.length;
-  const height = count === 0
-    ? rowHeight + padding
-    : Math.min(maxHeight, count * rowHeight + padding);
-
-  select.style.height = `${height}px`;
-  select.style.overflowY = height >= maxHeight && count > 0 ? 'auto' : 'hidden';
-  select.size = Math.max(1, Math.min(count || 1, Math.floor(maxHeight / rowHeight)));
 }
 
 // Show/hide visualization controls based on chart type.
@@ -329,7 +357,7 @@ function updateVizControlsForChartType() {
     hint.textContent = isSummary
       ? 'Rounded bars with values shown on each bar. Pick stats above, then Build summary bar.'
       : isHistogram
-        ? 'Shared bins across overlays. Use “% of frames” when capture lengths differ.'
+        ? 'Shared bins across overlays. Use "% of frames" when capture lengths differ.'
         : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.';
   }
 
@@ -362,6 +390,10 @@ function setupStatsSidebarControls() {
   wireDatasetPicker('statDatasetSelect', 'statsSelectAll', 'statsClearSel', () => {
     window.updateMetricDropdowns?.();
   });
+  wireDatasetPicker('datasetSelect', 'vizSelectAll', 'vizClearSel', () => {
+    window.updateMetricDropdowns?.();
+    syncColorPickerFromSelection();
+  });
   wireDatasetPicker(
     'reliabilityDatasetSelect',
     'reliabilitySelectAll',
@@ -378,7 +410,9 @@ function setupStatsSidebarControls() {
   const setChips = (predicate) => {
     if (!metricGroup) return;
     metricGroup.querySelectorAll('.toggle-button').forEach(btn => {
-      btn.classList.toggle('active', predicate(btn.dataset.metric));
+      const active = predicate(btn.dataset.metric);
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
     });
     window.updateStatsAverageLabel?.();
   };
@@ -399,20 +433,140 @@ function setupStatsSidebarControls() {
  * or in their own file; adjust as you prefer.
  */
 
-// Update color preview
+// Keep the visible swatch face in sync with #colorSelect.
 function updateColorPreview() {
   const colorInput = document.getElementById('colorSelect');
-  const preview = document.getElementById('colorPreview');
-  if (colorInput && preview) {
-    preview.style.backgroundColor = colorInput.value;
+  const face = document.getElementById('colorSwatchFace');
+  if (colorInput && face) {
+    face.style.backgroundColor = colorInput.value;
   }
 }
 
-function syncColorPickerFromSelection() {
-  const sel = document.getElementById('datasetSelect');
+function getPaletteColors() {
+  if (Array.isArray(window.BENCHMARK_COLORS) && window.BENCHMARK_COLORS.length) {
+    return window.BENCHMARK_COLORS.slice();
+  }
+  return ['#3B82F6', '#EF4444', '#F59E0B', '#22C55E', '#A855F7', '#06B6D4', '#F97316', '#EC4899', '#84CC16', '#6366F1'];
+}
+
+function closeColorPopover() {
+  const popover = document.getElementById('colorPopover');
+  const swatchBtn = document.getElementById('colorSwatchBtn');
+  const wasOpen = popover && !popover.classList.contains('hidden');
+  if (popover) popover.classList.add('hidden');
+  swatchBtn?.setAttribute('aria-expanded', 'false');
+  if (wasOpen) swatchBtn?.focus();
+}
+
+function openColorPopover() {
+  const popover = document.getElementById('colorPopover');
+  const swatches = document.getElementById('colorPopoverSwatches');
+  const swatchBtn = document.getElementById('colorSwatchBtn');
   const colorInput = document.getElementById('colorSelect');
-  if (!sel || !colorInput || !sel.selectedOptions.length) return;
-  const ds = window.allDatasets?.[+sel.selectedOptions[0].value];
+  if (!popover || !swatches || !colorInput) return;
+
+  const current = (colorInput.value || '').toLowerCase();
+  swatches.innerHTML = '';
+  getPaletteColors().forEach(color => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'color-popover-swatch';
+    btn.style.backgroundColor = color;
+    btn.title = color;
+    btn.setAttribute('aria-label', `Use palette color ${color}`);
+    if (color.toLowerCase() === current) btn.classList.add('is-current');
+    btn.addEventListener('click', () => {
+      colorInput.value = color;
+      updateColorPreview();
+      applyColorToSelectedDatasets();
+      closeColorPopover();
+    });
+    swatches.appendChild(btn);
+  });
+
+  popover.classList.remove('hidden');
+  swatchBtn?.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => {
+    popover.querySelector('button:not([disabled])')?.focus();
+  });
+}
+
+function trapColorPopoverFocus(event) {
+  const popover = document.getElementById('colorPopover');
+  if (!popover || popover.classList.contains('hidden')) return;
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeColorPopover();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+
+  const focusable = Array.from(
+    popover.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')
+  ).filter(element => !element.hidden && element.getClientRects().length > 0);
+  if (!focusable.length) {
+    event.preventDefault();
+    popover.focus();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !popover.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !popover.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function setupColorPicker() {
+  const colorInput = document.getElementById('colorSelect');
+  const swatchBtn = document.getElementById('colorSwatchBtn');
+  const customBtn = document.getElementById('colorCustomBtn');
+  const container = document.querySelector('.color-picker-container');
+  if (!colorInput || !swatchBtn) return;
+
+  updateColorPreview();
+
+  // Live drag updates the swatch; commit (and duplicate checks) happen on change.
+  colorInput.addEventListener('input', updateColorPreview);
+  colorInput.addEventListener('change', () => {
+    applyColorToSelectedDatasets();
+    closeColorPopover();
+  });
+
+  swatchBtn.addEventListener('click', () => {
+    const popover = document.getElementById('colorPopover');
+    if (popover && !popover.classList.contains('hidden')) {
+      closeColorPopover();
+      return;
+    }
+    openColorPopover();
+  });
+
+  customBtn?.addEventListener('click', () => {
+    closeColorPopover();
+    colorInput.click();
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!container?.contains(event.target)) closeColorPopover();
+  });
+
+  document.addEventListener('keydown', trapColorPopoverFocus);
+}
+
+function syncColorPickerFromSelection() {
+  const picker = document.getElementById('datasetSelect');
+  const colorInput = document.getElementById('colorSelect');
+  const selectedValues = getDatasetPickerValues(picker);
+  if (!colorInput || !selectedValues.length) return;
+  const index = window.getDatasetIndexById?.(selectedValues[0]) ?? -1;
+  const ds = index >= 0 ? window.allDatasets?.[index] : null;
   if (ds?.color) {
     colorInput.value = ds.color;
     updateColorPreview();
@@ -421,12 +575,13 @@ function syncColorPickerFromSelection() {
 
 function applyColorToSelectedDatasets() {
   const colorInput = document.getElementById('colorSelect');
-  const sel = document.getElementById('datasetSelect');
+  const picker = document.getElementById('datasetSelect');
   if (!colorInput) return;
   updateColorPreview();
-  if (!sel || !sel.selectedOptions.length) return;
+  if (!picker) return;
   const color = colorInput.value.toLowerCase();
-  const selectedIdx = Array.from(sel.selectedOptions).map(opt => +opt.value);
+  const selectedIdx = getDatasetPickerIndices(picker);
+  if (!selectedIdx.length) return;
   if (selectedIdx.length > 1) {
     window.notify?.('Pick one dataset at a time when assigning a manual color, so colors stay unique.', 'warning');
     syncColorPickerFromSelection();
@@ -456,29 +611,8 @@ function applyColorToSelectedDatasets() {
   }
 }
 
-// Pick the first palette color not already used by a dataset, falling back to a
-// random distinct color if every palette slot is taken.
-function pickUnusedColor() {
-  const used = new Set(
-    (window.allDatasets || []).map(ds => (ds.color || '').toLowerCase())
-  );
-  if (typeof window.getBenchmarkColor === 'function') {
-    for (let i = 0; i < 14; i++) {
-      const candidate = window.getBenchmarkColor(i);
-      if (!used.has(candidate.toLowerCase())) return candidate;
-    }
-  }
-  let candidate = randomColor();
-  let guard = 0;
-  while (used.has(candidate.toLowerCase()) && guard++ < 50) {
-    candidate = randomColor();
-  }
-  return candidate;
-}
-
-// Random color generator
+// Random color generator (fallback if a custom path needs a distinct color)
 function randomColor() {
-  // Helper function to generate a random color component between 30-220
   const randomComponent = () => Math.floor(30 + Math.random() * 190).toString(16).padStart(2, '0');
   return `#${randomComponent()}${randomComponent()}${randomComponent()}`;
 }
@@ -492,6 +626,7 @@ function onChartHeightChange(e) {
   
   const val = e.target.value;
   if (heightValSpan) heightValSpan.textContent = val + 'px';
+  e.target.setAttribute('aria-valuetext', `${val} pixels`);
   if (chartContainer) {
     chartContainer.style.height = val + 'px';
     if (window.mainChart) {
@@ -502,8 +637,10 @@ function onChartHeightChange(e) {
 
 // Reset chart zoom
 function resetChartZoom() {
+  if (window.currentChartType === 'summarybar') return;
   if (window.mainChart && window.mainChart.resetZoom) {
     window.mainChart.resetZoom();
+    window.setResetZoomEnabled?.(false);
   }
 }
 
@@ -540,24 +677,37 @@ function notify(msg, type = 'info') {
   
   const notification = document.createElement('div');
   notification.className = `notification ${type}`;
-  notification.innerHTML = `
-    <span>${msg}</span>
-    <span class="notification-close">&times;</span>
-  `;
+  notification.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  notification.setAttribute('aria-atomic', 'true');
+
+  const message = document.createElement('span');
+  message.textContent = msg;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'notification-close';
+  close.textContent = 'Close';
+  close.setAttribute('aria-label', 'Dismiss notification');
+  notification.append(message, close);
   
   container.appendChild(notification);
   
-  // Auto-remove after 5 seconds
-  setTimeout(() => {
+  const dismiss = () => {
     notification.style.animation = 'slide-out 0.3s forwards';
     setTimeout(() => notification.remove(), 300);
-  }, 5000);
+  };
+  const scheduleDismiss = () => {
+    setTimeout(() => {
+      if (notification.matches(':focus-within')) {
+        scheduleDismiss();
+        return;
+      }
+      dismiss();
+    }, 5000);
+  };
+  scheduleDismiss();
   
   // Add close button functionality
-  notification.querySelector('.notification-close').addEventListener('click', () => {
-    notification.style.animation = 'slide-out 0.3s forwards';
-    setTimeout(() => notification.remove(), 300);
-  });
+  close.addEventListener('click', dismiss);
 }
 
 // Export notify to the global scope

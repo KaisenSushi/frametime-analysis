@@ -3,6 +3,15 @@ window.allDatasets = [];
 window.nextDatasetId = window.nextDatasetId || 1;
 
 /**
+ * Resolve a stable dataset ID to its current array position. UI controls store
+ * IDs so removing another dataset cannot silently change their selection.
+ */
+function getDatasetIndexById(datasetId) {
+  const id = String(datasetId);
+  return (window.allDatasets || []).findIndex(dataset => String(dataset.id) === id);
+}
+
+/**
  * Clears all dataset data from memory and refreshes UI elements.
  */
 function clearAllDatasets() {
@@ -46,9 +55,18 @@ const METRIC_BLACKLIST = new Set([
 const DERIVED_METRICS = [
   'RenderedFPS',
   'DisplayedFPS',
+  'DisplayedFrameTime',
   'Stepwise_Relative_SD',
   'Coefficient_of_Variation',
   'RMSSD',
+  'Rendered_FTSD',
+  'Displayed_FTSD',
+  'Rendered_Coefficient_of_Variation',
+  'Displayed_Coefficient_of_Variation',
+  'Rendered_RMSSD',
+  'Displayed_RMSSD',
+  'Rendered_Stepwise_Relative_SD',
+  'Displayed_Stepwise_Relative_SD',
   'Skewness',
   'Kurtosis',
   'Nonparametric_Skew'
@@ -58,6 +76,14 @@ const FRAMETIME_DERIVED_METRICS = new Set([
   'Stepwise_Relative_SD',
   'Coefficient_of_Variation',
   'RMSSD',
+  'Rendered_FTSD',
+  'Displayed_FTSD',
+  'Rendered_Coefficient_of_Variation',
+  'Displayed_Coefficient_of_Variation',
+  'Rendered_RMSSD',
+  'Displayed_RMSSD',
+  'Rendered_Stepwise_Relative_SD',
+  'Displayed_Stepwise_Relative_SD',
   'Skewness',
   'Kurtosis',
   'Nonparametric_Skew'
@@ -70,27 +96,44 @@ const ADVANCED_ONLY_METRICS = new Set([
 ]);
 
 const CORE_METRICS = [
-  'FPS', 'FrameTime', 'RenderedFPS', 'DisplayedFPS',
+  'RenderedFPS', 'DisplayedFPS',
   'MsBetweenPresents', 'MsBetweenDisplayChange',
   'MsGPUBusy', 'MsUntilDisplayed',
-  'Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'
+  'Rendered_FTSD', 'Displayed_FTSD',
+  'Rendered_Coefficient_of_Variation', 'Displayed_Coefficient_of_Variation',
+  'Rendered_RMSSD', 'Displayed_RMSSD',
+  'Rendered_Stepwise_Relative_SD', 'Displayed_Stepwise_Relative_SD'
 ];
 
-const STATS_DEFAULT_ACTIVE = new Set(CORE_METRICS);
+const STATS_DEFAULT_ACTIVE = new Set([
+  'RenderedFPS', 'DisplayedFPS',
+  'Rendered_FTSD', 'Displayed_FTSD',
+  'Rendered_Coefficient_of_Variation', 'Displayed_Coefficient_of_Variation',
+  'Rendered_RMSSD', 'Displayed_RMSSD',
+  'Rendered_Stepwise_Relative_SD', 'Displayed_Stepwise_Relative_SD'
+]);
+const noCommonMetricsNotifiedSelections = new Set();
 
 // Grouping for the Statistics sidebar metric chips.
 const STATS_METRIC_GROUPS = [
-  { label: 'Frame timing', metrics: ['FPS', 'FrameTime'] },
-  { label: 'Distribution shape', metrics: ['Skewness', 'Kurtosis', 'Nonparametric_Skew'] },
+  { label: 'Performance — Rendered', metrics: ['RenderedFPS', 'MsBetweenPresents'] },
+  { label: 'Performance — Displayed', metrics: ['DisplayedFPS', 'MsBetweenDisplayChange'] },
   {
-    label: 'Display pipeline',
+    label: 'Smoothness — Rendered',
     metrics: [
-      'RenderedFPS', 'DisplayedFPS',
-      'MsBetweenPresents', 'MsBetweenDisplayChange'
+      'Rendered_FTSD', 'Rendered_Coefficient_of_Variation',
+      'Rendered_RMSSD', 'Rendered_Stepwise_Relative_SD'
     ]
   },
-  { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] },
-  { label: 'Stability', metrics: ['Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD'] }
+  {
+    label: 'Smoothness — Displayed',
+    metrics: [
+      'Displayed_FTSD', 'Displayed_Coefficient_of_Variation',
+      'Displayed_RMSSD', 'Displayed_Stepwise_Relative_SD'
+    ]
+  },
+  { label: 'Distribution shape', metrics: ['Skewness', 'Kurtosis', 'Nonparametric_Skew'] },
+  { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] }
 ];
 
 // global UI flag (default = basic mode)
@@ -151,7 +194,7 @@ function parseCfxJson(text, fileName){
     json = JSON.parse(text);
   }catch(e){
     console.warn('Not valid JSON:', fileName);
-    return [];
+    return { error: 'invalid_json', message: e.message };
   }
   if (!json?.Runs?.length){
     console.warn('No Runs[] array in file:', fileName);
@@ -163,24 +206,25 @@ function parseCfxJson(text, fileName){
   json.Runs.forEach(run=>{
     const cd = run.CaptureData ?? {};
 
-    // Determine how many frames we have - fall back to longest array
-    let frames = Array.isArray(cd.MsBetweenPresents) ? cd.MsBetweenPresents.length : 0;
-    if (!frames){
-      // grab the first array length we can find
-      for (const v of Object.values(cd)){
-        if (Array.isArray(v)){ frames = v.length; break; }
-      }
-    }
-    if (!frames){ return; }   // nothing useful in this run
+    const arrayFields = Object.entries(cd).filter(([, value]) => Array.isArray(value));
+    if (!arrayFields.length) return;
 
+    const lengths = arrayFields.map(([, value]) => value.length);
+    const frames = Math.min(...lengths);
+    if (new Set(lengths).size > 1) {
+      const message = `CaptureData arrays have mismatched lengths in ${fileName}; trimming this run to ${frames} frame(s).`;
+      console.warn(message);
+      window.notify?.(message, 'warning');
+    }
+    if (!frames) return;
+
+    // Mismatched CaptureData arrays are trimmed to the shortest length.
     for (let i=0; i<frames; i++){
       const r = {};
 
       // copy every per‑frame column
-      Object.entries(cd).forEach(([key,val])=>{
-        if (Array.isArray(val) && i < val.length){
-          r[key] = val[i];
-        }
+      arrayFields.forEach(([key, val]) => {
+        r[key] = val[i];
       });
 
       // un‑alias MsBetweenPresents → FrameTime (ms)
@@ -303,55 +347,80 @@ function resolveDuplicateDataset(fileName) {
   const existingIndex = (window.allDatasets || [])
     .findIndex(dataset => dataset.name === fileName);
   if (existingIndex === -1) {
-    return { action: 'add', name: fileName, existingIndex: -1 };
+    return Promise.resolve({ action: 'add', name: fileName, existingIndex: -1 });
   }
 
-  if (typeof window.prompt !== 'function') {
-    return {
+  if (typeof HTMLDialogElement === 'undefined') {
+    return Promise.resolve({
       action: 'rename',
       name: makeUniqueDatasetName(fileName),
       existingIndex
-    };
+    });
   }
 
-  let choice;
-  try {
-    choice = window.prompt(
-      `"${fileName}" is already loaded.\n\nEnter R to replace it, K to keep both with a new name, or C to cancel this file.`,
-      'K'
-    );
-  } catch (error) {
-    return {
-      action: 'rename',
-      name: makeUniqueDatasetName(fileName),
-      existingIndex
-    };
-  }
+  return new Promise(resolve => {
+    const previouslyFocused = document.activeElement;
+    const dialog = document.createElement('dialog');
+    const title = document.createElement('h2');
+    const description = document.createElement('p');
+    const actions = document.createElement('div');
+    const replaceButton = document.createElement('button');
+    const keepBothButton = document.createElement('button');
+    const cancelButton = document.createElement('button');
+    const titleId = 'duplicate-dataset-dialog-title';
 
-  if (choice === null) {
-    return { action: 'cancel', name: fileName, existingIndex };
-  }
-  if (typeof choice !== 'string') {
-    return {
-      action: 'rename',
-      name: makeUniqueDatasetName(fileName),
-      existingIndex
+    dialog.className = 'duplicate-dataset-dialog';
+    dialog.setAttribute('aria-labelledby', titleId);
+    title.id = titleId;
+    title.textContent = 'Duplicate dataset';
+    description.textContent = `"${fileName}" is already loaded. Choose how to handle it.`;
+    replaceButton.type = 'button';
+    replaceButton.textContent = 'Replace';
+    keepBothButton.type = 'button';
+    keepBothButton.textContent = 'Keep both';
+    cancelButton.type = 'button';
+    cancelButton.textContent = 'Cancel';
+    actions.append(replaceButton, keepBothButton, cancelButton);
+    dialog.append(title, description, actions);
+    document.body.appendChild(dialog);
+
+    let action = 'cancel';
+    const closeDialog = (nextAction) => {
+      action = nextAction;
+      dialog.close();
     };
-  }
-  if (choice.trim().toLowerCase() === 'c') {
-    return { action: 'cancel', name: fileName, existingIndex };
-  }
-  if (choice.trim().toLowerCase() === 'r') {
-    return { action: 'replace', name: fileName, existingIndex };
-  }
-  return {
-    action: 'rename',
-    name: makeUniqueDatasetName(fileName),
-    existingIndex
-  };
+    replaceButton.addEventListener('click', () => closeDialog('replace'));
+    keepBothButton.addEventListener('click', () => closeDialog('rename'));
+    cancelButton.addEventListener('click', () => closeDialog('cancel'));
+    dialog.addEventListener('cancel', event => {
+      event.preventDefault();
+      closeDialog('cancel');
+    });
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      previouslyFocused?.focus?.();
+      resolve({
+        action,
+        name: action === 'rename' ? makeUniqueDatasetName(fileName) : fileName,
+        existingIndex
+      });
+    }, { once: true });
+
+    dialog.showModal();
+    replaceButton.focus();
+  });
 }
 
-function handleFileUpload(e) {
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => resolve(event.target.result);
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsText(file);
+  });
+}
+
+async function handleFileUpload(e) {
   const files = e.target.files;
   if (!files.length) return;
 
@@ -371,6 +440,7 @@ function handleFileUpload(e) {
     if (replacedCount > 0) {
       window.clearChart?.();
       window.resetStatsPanel?.();
+      window.resetReliabilityPanel?.();
     }
     refreshDatasetLists();
 
@@ -392,76 +462,63 @@ function handleFileUpload(e) {
     }
   }
 
-  Array.from(files).forEach(file => {
-    const reader = new FileReader();
-    
-    reader.onload = ev => {
-      try {
-        const text = ev.target.result;
-        const parsedRows = file.name.toLowerCase().endsWith('.json')
-                                    ? parseCfxJson(text, file.name)
-                                    : parseCSV(text);
-        
-        if (parsedRows.length === 0) {
-          // Check if notify function exists before calling it
-          if (typeof window.notify === 'function') {
-            window.notify(`No valid data rows found in ${file.name}`, 'warning');
-          } else {
-            console.warn(`No valid data rows found in ${file.name}`);
-          }
-          errorCount++;
-          finishOneFile();
-          return;
-        }
+  for (const file of Array.from(files)) {
+    try {
+      const text = await readFileAsText(file);
+      const parsedRows = file.name.toLowerCase().endsWith('.json')
+        ? parseCfxJson(text, file.name)
+        : parseCSV(text);
 
-        const duplicate = resolveDuplicateDataset(file.name);
-        if (duplicate.action === 'cancel') {
-          skippedCount++;
-          finishOneFile();
-          return;
-        }
-
-        const datasetObj = {
-          id: duplicate.action === 'replace'
-            ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
-            : window.nextDatasetId++,
-          name: duplicate.name,
-          rows: parsedRows
-        };
-
-        if (duplicate.action === 'replace') {
-          const existing = window.allDatasets[duplicate.existingIndex];
-          if (existing?.color) datasetObj.color = existing.color;
-          window.allDatasets[duplicate.existingIndex] = datasetObj;
-          replacedCount++;
-        } else {
-          window.allDatasets.push(datasetObj);
-          if (duplicate.action === 'rename') renamedCount++;
-        }
-        successCount++;
+      if (parsedRows?.error === 'invalid_json') {
+        window.notify?.(`Invalid JSON in ${file.name}: ${parsedRows.message}`, 'error');
+        errorCount++;
         finishOneFile();
-      } catch (error) {
-        console.error(`Error parsing ${file.name}:`, error);
+        continue;
+      }
+      if (parsedRows.length === 0) {
+        const message = `No valid data rows found in ${file.name}`;
         if (typeof window.notify === 'function') {
-          window.notify(`Error parsing ${file.name}: ${error.message}`, 'error');
+          window.notify(message, 'warning');
+        } else {
+          console.warn(message);
         }
         errorCount++;
         finishOneFile();
+        continue;
       }
-    };
-    
-    reader.onerror = () => {
-      if (typeof window.notify === 'function') {
-        window.notify(`Failed to read ${file.name}`, 'error');
+
+      const duplicate = await resolveDuplicateDataset(file.name);
+      if (duplicate.action === 'cancel') {
+        skippedCount++;
+        finishOneFile();
+        continue;
+      }
+
+      const datasetObj = {
+        id: duplicate.action === 'replace'
+          ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
+          : window.nextDatasetId++,
+        name: duplicate.name,
+        rows: parsedRows
+      };
+
+      if (duplicate.action === 'replace') {
+        const existing = window.allDatasets[duplicate.existingIndex];
+        if (existing?.color) datasetObj.color = existing.color;
+        window.allDatasets[duplicate.existingIndex] = datasetObj;
+        replacedCount++;
       } else {
-        console.error(`Failed to read ${file.name}`);
+        window.allDatasets.push(datasetObj);
+        if (duplicate.action === 'rename') renamedCount++;
       }
+      successCount++;
+    } catch (error) {
+      console.error(`Error parsing ${file.name}:`, error);
+      window.notify?.(`Error parsing ${file.name}: ${error.message}`, 'error');
       errorCount++;
-      finishOneFile();
-    };
-    
-    reader.readAsText(file);
-  });
+    }
+    finishOneFile();
+  }
 }
 
 /**
@@ -469,26 +526,20 @@ function handleFileUpload(e) {
  * that let users pick datasets in other tabs (Visualization, Statistics, Reliability, etc.).
  */
 /**
- * Removes a single dataset by index and refreshes dependent UI. Because charts
- * and selects reference datasets by index, the chart is reset to avoid stale
- * series pointing at re-indexed datasets.
+ * Removes a single dataset by index and refreshes dependent UI. Visualization
+ * selections use stable IDs, while rendered chart series still store current
+ * array positions, so the chart is reset to avoid stale series after reindexing.
  */
-function removeDataset(index) {
+function removeUploadedDataset(index) {
   if (index < 0 || index >= window.allDatasets.length) return;
 
   const [removed] = window.allDatasets.splice(index, 1);
 
-  if (typeof window.clearChart === 'function') {
-    window.clearChart();
-  }
+  window.clearChart?.();
+  window.resetStatsPanel?.();
 
   if (!window.allDatasets.length) {
-    if (typeof window.resetStatsPanel === 'function') {
-      window.resetStatsPanel();
-    }
-    if (typeof window.resetReliabilityPanel === 'function') {
-      window.resetReliabilityPanel();
-    }
+    window.resetReliabilityPanel?.();
   }
 
   refreshDatasetLists();
@@ -526,7 +577,7 @@ function refreshDatasetLists() {
       removeBtn.textContent = '\u00d7';
       removeBtn.title = `Remove ${ds.name}`;
       removeBtn.setAttribute('aria-label', `Remove ${ds.name}`);
-      removeBtn.addEventListener('click', () => removeDataset(index));
+      removeBtn.addEventListener('click', () => removeUploadedDataset(index));
       li.appendChild(removeBtn);
 
       ul.appendChild(li);
@@ -552,29 +603,6 @@ function refreshDatasetLists() {
   
   // Dispatch a custom event to notify that datasets have been updated
   document.dispatchEvent(new CustomEvent('datasetsUpdated'));
-}
-
-function detectAvailableMetrics() {
-  const metrics = new Set(['FPS', 'FrameTime']);      // always keep these
-
-  window.allDatasets.forEach(ds => {
-    if (!ds.rows?.length) return;
-    const sample = ds.rows[0];
-    Object.keys(sample).forEach(k => {
-      if (
-        typeof sample[k] === 'number' &&
-        !METRIC_BLACKLIST.has(k)
-      ) {
-        metrics.add(k);
-      }
-    });
-  });
-
-  // basic ⇄ advanced toggle
-  if (!window.showAdvancedMetrics) {
-    return ['FPS', 'FrameTime'];
-  }
-  return Array.from(metrics);
 }
 
 /**
@@ -604,13 +632,30 @@ function numericColumnsForDataset(ds) {
   const hasGpuBusy = ds.rows.some(r => getMetricValue(r, 'MsGPUBusy') != null);
   const hasUntilDisplayed = ds.rows.some(r => getMetricValue(r, 'MsUntilDisplayed') != null);
   const hasFrametimes = ds.rows.some(r => Number.isFinite(r.FrameTime) && r.FrameTime > 0);
+  const hasDisplayedFrametimes = ds.rows.some(r => {
+    const v = getMetricValue(r, 'DisplayedFrameTime');
+    return Number.isFinite(v) && v > 0;
+  });
 
   if (hasPresents) numeric.add('RenderedFPS');
   if (hasDisplay) numeric.add('DisplayedFPS');
   if (hasGpuBusy) numeric.add('MsGPUBusy');
   if (hasUntilDisplayed) numeric.add('MsUntilDisplayed');
+  if (hasDisplayedFrametimes) numeric.add('DisplayedFrameTime');
   if (hasFrametimes) {
-    FRAMETIME_DERIVED_METRICS.forEach(m => numeric.add(m));
+    numeric.add('Rendered_FTSD');
+    numeric.add('Rendered_Coefficient_of_Variation');
+    numeric.add('Rendered_RMSSD');
+    numeric.add('Rendered_Stepwise_Relative_SD');
+    FRAMETIME_DERIVED_METRICS.forEach(m => {
+      if (!m.startsWith('Displayed_')) numeric.add(m);
+    });
+  }
+  if (hasDisplayedFrametimes) {
+    numeric.add('Displayed_FTSD');
+    numeric.add('Displayed_Coefficient_of_Variation');
+    numeric.add('Displayed_RMSSD');
+    numeric.add('Displayed_Stepwise_Relative_SD');
   }
 
   return numeric;
@@ -650,7 +695,7 @@ function computeAvailableMetrics(selectedIdxs) {
   if (!window.showAdvancedMetrics) {
     metrics = metrics.filter(m => CORE_METRICS.includes(m));
     if (!metrics.length) {
-      metrics = ['FrameTime', 'FPS'].filter(m =>
+      metrics = ['RenderedFPS', 'DisplayedFPS'].filter(m =>
         pool.some(ds => ds.rows?.some(r => getMetricValue(r, m) != null))
       );
     }
@@ -661,14 +706,16 @@ function computeAvailableMetrics(selectedIdxs) {
 }
 
 function getTabDatasetIndices(tab) {
+  if (tab === 'viz' && typeof window.getDatasetPickerIndices === 'function') {
+    return window.getDatasetPickerIndices('datasetSelect');
+  }
   if (tab === 'stats' && typeof window.getDatasetPickerIndices === 'function') {
     return window.getDatasetPickerIndices('statDatasetSelect');
   }
   if (tab === 'reliability' && typeof window.getDatasetPickerIndices === 'function') {
     return window.getDatasetPickerIndices('reliabilityDatasetSelect');
   }
-  const dsSelect = document.getElementById('datasetSelect');
-  return dsSelect ? Array.from(dsSelect.selectedOptions).map(o => +o.value) : [];
+  return [];
 }
 
 function populateMetricSelect(select, metrics, previousValue) {
@@ -686,6 +733,10 @@ function populateMetricSelect(select, metrics, previousValue) {
   const availableMetrics = Array.from(select.options).map(option => option.value);
   if (previousValue && availableMetrics.includes(previousValue)) {
     select.value = previousValue;
+  } else if (availableMetrics.includes('RenderedFPS')) {
+    select.value = 'RenderedFPS';
+  } else if (availableMetrics.includes('DisplayedFPS')) {
+    select.value = 'DisplayedFPS';
   } else if (availableMetrics.includes('FrameTime')) {
     select.value = 'FrameTime';
   } else if (availableMetrics.includes('FPS')) {
@@ -714,7 +765,13 @@ function updateMetricDropdowns() {
   }
 
   const statsSelected = getTabDatasetIndices('stats');
-  if (statsMetrics.length === 0 && statsSelected.length > 1) {
+  const selectionKey = statsSelected.slice().sort((a, b) => a - b).join('|');
+  if (
+    statsMetrics.length === 0 &&
+    statsSelected.length > 1 &&
+    !noCommonMetricsNotifiedSelections.has(selectionKey)
+  ) {
+    noCommonMetricsNotifiedSelections.add(selectionKey);
     window.notify?.('No common numeric metrics across selected datasets.', 'warning');
   }
 }
@@ -725,8 +782,22 @@ const STATS_CHIP_LABELS = {
   'FrameTime': 'Frame Time (Present)',
   'RenderedFPS': 'Rendered FPS',
   'DisplayedFPS': 'Displayed FPS',
+  'DisplayedFrameTime': 'Displayed Frame Time',
+  'Rendered_FTSD': 'Rendered FTSD',
+  'Displayed_FTSD': 'Displayed FTSD',
+  'Rendered_Coefficient_of_Variation': 'Rendered CoV',
+  'Displayed_Coefficient_of_Variation': 'Displayed CoV',
+  'Rendered_RMSSD': 'Rendered RMSSD',
+  'Displayed_RMSSD': 'Displayed RMSSD',
+  'Rendered_Stepwise_Relative_SD': 'Rendered Stepwise-Rel.',
+  'Displayed_Stepwise_Relative_SD': 'Displayed Stepwise-Rel.',
+  'MsBetweenPresents': 'MsBetweenPresents',
+  'MsBetweenDisplayChange': 'MsBetweenDisplayChange',
+  'MsInPresentAPI': 'MsInPresentAPI',
+  'MsRenderPresentLatency': 'MsRenderPresentLatency',
   'MsGPUBusy': 'MsGPUBusy',
   'MsUntilDisplayed': 'MsUntilDisplayed',
+  'MsPCLatency': 'MsPCLatency',
   'Stepwise_Relative_SD': 'Stepwise Rel. SD',
   'Coefficient_of_Variation': 'CV (σ/μ)',
   'RMSSD': 'RMSSD',
@@ -736,7 +807,10 @@ const STATS_CHIP_LABELS = {
 };
 
 function getMetricChipLabel(metric) {
-  return STATS_CHIP_LABELS[metric] || getMetricDisplayName(metric);
+  if (STATS_CHIP_LABELS[metric]) return STATS_CHIP_LABELS[metric];
+  return getMetricDisplayName(metric)
+    .replace(/ \(ms\)$/i, '')
+    .replace(/ \(%\)$/i, '');
 }
 
 /** Flat list of metrics in the fixed chip display order (group order, then extras). */
@@ -788,18 +862,59 @@ function renderStatsMetricGroups(container, metrics) {
     btn.className = 'toggle-button';
     btn.dataset.metric = metric;
     btn.textContent = getMetricChipLabel(metric);
+    btn.title = getMetricDisplayName(metric);
+    btn.setAttribute('aria-label', getMetricDisplayName(metric));
     const active = firstRender ? STATS_DEFAULT_ACTIVE.has(metric) : previouslyActive.has(metric);
     if (active) btn.classList.add('active');
+    btn.setAttribute('aria-pressed', String(active));
     btn.addEventListener('click', () => {
-      btn.classList.toggle('active');
+      const isActive = btn.classList.toggle('active');
+      btn.setAttribute('aria-pressed', String(isActive));
       window.updateStatsAverageLabel?.();
     });
     return btn;
   };
 
-  displayOrder.forEach(metric => {
-    container.appendChild(makeChip(metric));
+  const grouped = new Set();
+  const appendMetricGroup = (labelText, groupMetrics, hint, groupIndex) => {
+    if (!groupMetrics.length) return;
+
+    const section = document.createElement('section');
+    const label = document.createElement('div');
+    const chips = document.createElement('div');
+    const labelId = `${container.id}-metric-group-${groupIndex}`;
+
+    section.className = 'stats-metric-group';
+    if (labelText.includes('Rendered')) {
+      section.classList.add('stats-metric-group--rendered');
+    } else if (labelText.includes('Displayed')) {
+      section.classList.add('stats-metric-group--displayed');
+    }
+    section.setAttribute('role', 'group');
+    section.setAttribute('aria-labelledby', labelId);
+    label.id = labelId;
+    label.className = 'stats-metric-group-label';
+    label.textContent = labelText;
+    if (hint) {
+      const hintElement = document.createElement('span');
+      hintElement.className = 'stats-hint';
+      hintElement.textContent = hint;
+      label.appendChild(hintElement);
+    }
+    chips.className = 'stats-metric-chips';
+    groupMetrics.forEach(metric => chips.appendChild(makeChip(metric)));
+    section.append(label, chips);
+    container.appendChild(section);
+  };
+
+  STATS_METRIC_GROUPS.forEach((group, index) => {
+    const groupMetrics = group.metrics.filter(metric => metrics.includes(metric));
+    groupMetrics.forEach(metric => grouped.add(metric));
+    appendMetricGroup(group.label, groupMetrics, group.hint, index);
   });
+
+  const advancedMetrics = displayOrder.filter(metric => !grouped.has(metric));
+  appendMetricGroup('Advanced', advancedMetrics, null, STATS_METRIC_GROUPS.length);
 
   window.updateStatsAverageLabel?.();
 }
@@ -810,10 +925,19 @@ function renderStatsMetricGroups(container, metrics) {
  */
 function getMetricDisplayName(metric) {
   const displayNames = {
-    'FrameTime': 'Frame Time (Present, ms)',
+    'FrameTime': 'Rendered Frame Time (ms)',
     'FPS': 'FPS (Present / MsBetweenPresents)',
+    'DisplayedFrameTime': 'Displayed Frame Time (ms)',
     'RenderedFPS': 'Rendered FPS (MsBetweenPresents)',
     'DisplayedFPS': 'Displayed FPS (MsBetweenDisplayChange)',
+    'Rendered_FTSD': 'Rendered Frame Time SD (FTSD)',
+    'Displayed_FTSD': 'Displayed Frame Time SD (FTSD)',
+    'Rendered_Coefficient_of_Variation': 'Rendered CoV (σ/μ)',
+    'Displayed_Coefficient_of_Variation': 'Displayed CoV (σ/μ)',
+    'Rendered_RMSSD': 'Rendered RMSSD (ms)',
+    'Displayed_RMSSD': 'Displayed RMSSD (ms)',
+    'Rendered_Stepwise_Relative_SD': 'Rendered Stepwise Relative SD',
+    'Displayed_Stepwise_Relative_SD': 'Displayed Stepwise Relative SD',
     'Stepwise_Relative_SD': 'Stepwise Relative SD',
     'Coefficient_of_Variation': 'Coefficient of Variation (σ/μ)',
     'RMSSD': 'RMSSD (ms)',
@@ -849,6 +973,15 @@ function getMetricDescription(metric) {
     'FPS': 'Frames per second from present timing (MsBetweenPresents, harmonic mean). Not display-based — use Displayed FPS for what appears on screen.',
     'RenderedFPS': 'Frames the GPU submitted for presentation.',
     'DisplayedFPS': 'Frames actually shown on screen. Reveals smoothness loss.',
+    'DisplayedFrameTime': 'Time between actual screen refreshes (MsBetweenDisplayChange).',
+    'Rendered_FTSD': 'Standard deviation of rendered (present) frame times. Lower is smoother.',
+    'Displayed_FTSD': 'Standard deviation of displayed (on-screen) frame times. Lower is smoother.',
+    'Rendered_Coefficient_of_Variation': 'CoV of rendered frame times. Lower is more consistent.',
+    'Displayed_Coefficient_of_Variation': 'CoV of displayed frame times. Lower is more consistent.',
+    'Rendered_RMSSD': 'RMSSD of rendered frame times. Lower is smoother.',
+    'Displayed_RMSSD': 'RMSSD of displayed frame times. Lower is smoother.',
+    'Rendered_Stepwise_Relative_SD': 'Frame-to-frame relative variability of rendered timing.',
+    'Displayed_Stepwise_Relative_SD': 'Frame-to-frame relative variability of displayed timing.',
     'MsGPUBusy': 'GPU work time per frame. Key for input lag even at stable FPS.',
     'MsUntilDisplayed': 'Time from CPU frame completion to display output.',
     'Stepwise_Relative_SD': 'Frame-to-frame relative variability. Lower is smoother.',
@@ -865,12 +998,12 @@ function getMetricDescription(metric) {
 window.getMetricChipLabel = getMetricChipLabel;
 window.STATS_DEFAULT_ACTIVE = STATS_DEFAULT_ACTIVE;
 window.getMetricDescription = getMetricDescription;
-window.removeDataset = removeDataset;
+window.removeUploadedDataset = removeUploadedDataset;
 window.clearAllDatasets = clearAllDatasets;
 window.parseCSV = parseCSV;
 window.handleFileUpload = handleFileUpload;
 window.refreshDatasetLists = refreshDatasetLists;
-window.detectAvailableMetrics = detectAvailableMetrics;
+window.getDatasetIndexById = getDatasetIndexById;
 window.updateMetricDropdowns = updateMetricDropdowns;
 window.getMetricDisplayName = getMetricDisplayName;
 window.parseCSVLine = parseCSVLine;

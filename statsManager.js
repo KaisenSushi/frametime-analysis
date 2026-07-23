@@ -75,6 +75,19 @@ function calculateRMSSD(values) {
 }
 
 /**
+ * FTSD - sample standard deviation of the raw frame-time series (ms).
+ */
+function calculateFrameTimeSD(values) {
+  const series = (values || []).filter(v => Number.isFinite(v) && v > 0);
+  const n = series.length;
+  if (n < 2) return NaN;
+  const mean = series.reduce((sum, value) => sum + value, 0) / n;
+  return (typeof jStat?.stdev === 'function')
+    ? jStat.stdev(series, true)
+    : Math.sqrt(series.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (n - 1));
+}
+
+/**
  * Bias-corrected sample skewness / excess kurtosis (Excel SKEW / KURT,
  * SciPy skew/kurtosis with bias=False), plus nonparametric skew.
  */
@@ -128,7 +141,15 @@ const AGGREGATE_FRAMETIME_METRICS = new Set([
   'RMSSD',
   'Skewness',
   'Kurtosis',
-  'Nonparametric_Skew'
+  'Nonparametric_Skew',
+  'Rendered_FTSD',
+  'Displayed_FTSD',
+  'Rendered_Coefficient_of_Variation',
+  'Displayed_Coefficient_of_Variation',
+  'Rendered_RMSSD',
+  'Displayed_RMSSD',
+  'Rendered_Stepwise_Relative_SD',
+  'Displayed_Stepwise_Relative_SD'
 ]);
 
 function calculateAggregateMetric(values, metricName) {
@@ -139,6 +160,18 @@ function calculateAggregateMetric(values, metricName) {
     case 'Skewness': return calculateDistributionShape(values).skewness;
     case 'Kurtosis': return calculateDistributionShape(values).kurtosis;
     case 'Nonparametric_Skew': return calculateDistributionShape(values).nonparametricSkew;
+    case 'Rendered_FTSD':
+    case 'Displayed_FTSD':
+      return calculateFrameTimeSD(values);
+    case 'Rendered_Coefficient_of_Variation':
+    case 'Displayed_Coefficient_of_Variation':
+      return calculateCoefficientOfVariation(values);
+    case 'Rendered_RMSSD':
+    case 'Displayed_RMSSD':
+      return calculateRMSSD(values);
+    case 'Rendered_Stepwise_Relative_SD':
+    case 'Displayed_Stepwise_Relative_SD':
+      return calculateStepwiseRelativeSD(values);
     default: return NaN;
   }
 }
@@ -148,9 +181,8 @@ function getDatasetColor(index) {
     return window.getBenchmarkColor(index);
   }
   const fallback = [
-    '#38bdf8', '#ff8c00', '#c084fc', '#fbbf24', '#2dd4bf', '#f472b6',
-    '#a3e635', '#818cf8', '#e879f9', '#5eead4', '#fb923c', '#60a5fa',
-    '#f9a8d4', '#deb887'
+    '#3B82F6', '#EF4444', '#F59E0B', '#22C55E', '#A855F7',
+    '#06B6D4', '#F97316', '#EC4899', '#84CC16', '#6366F1'
   ];
   return fallback[index % fallback.length];
 }
@@ -198,7 +230,8 @@ function getAverageMeanSubLabel(metrics = []) {
     case 'harmonic': return 'Harmonic';
     case 'arithmetic': return 'Arithmetic';
     case 'mixed': return 'Harmonic / Arithmetic';
-    default: return 'Mean';
+    case 'none':
+    default: return '';
   }
 }
 
@@ -214,9 +247,11 @@ function updateStatsAverageLabel() {
   if (subLabel) subLabel.textContent = getAverageMeanSubLabel(selectedMetrics);
 
   const label = getAverageDisplayLabel(selectedMetrics);
-  avgButton.title = selectedMetrics.length
+  const accessibleLabel = selectedMetrics.length
     ? `${label}; the formula is selected per metric.`
     : 'Select a metric to see which mean is used.';
+  avgButton.title = accessibleLabel;
+  avgButton.setAttribute('aria-label', accessibleLabel);
 }
 
 /**
@@ -228,10 +263,17 @@ function updateStatsAverageLabel() {
  */
 function formatStatValue(metric, stat, value) {
   if (!Number.isFinite(value)) return 'N/A';
-  if (metric === 'RMSSD') return value.toFixed(2);
+  if (metric === 'RMSSD' || metric === 'Rendered_RMSSD' || metric === 'Displayed_RMSSD') {
+    return value.toFixed(2);
+  }
+  if (metric === 'Rendered_FTSD' || metric === 'Displayed_FTSD') return value.toFixed(4);
   if (
     metric === 'Stepwise_Relative_SD' ||
     metric === 'Coefficient_of_Variation' ||
+    metric === 'Rendered_Stepwise_Relative_SD' ||
+    metric === 'Displayed_Stepwise_Relative_SD' ||
+    metric === 'Rendered_Coefficient_of_Variation' ||
+    metric === 'Displayed_Coefficient_of_Variation' ||
     metric === 'Skewness' ||
     metric === 'Kurtosis' ||
     metric === 'Nonparametric_Skew'
@@ -268,6 +310,10 @@ function getMetricValue(row, metric) {
   if (metric === 'DisplayedFPS') {
     const ms = findNumericKey(row, 'MsBetweenDisplayChange', 'MsBetweenDisplayChanges');
     return (ms && ms > 0) ? 1000.0 / ms : null;
+  }
+
+  if (metric === 'DisplayedFrameTime') {
+    return findNumericKey(row, 'MsBetweenDisplayChange', 'MsBetweenDisplayChanges');
   }
 
   // GPU busy time - critical for input lag even when FPS looks fine
@@ -316,12 +362,13 @@ function getMetricValue(row, metric) {
   return (matchingKey && typeof row[matchingKey] === 'number') ? row[matchingKey] : null;
 }
 
-function calculateStatistics(arr, metricName = '') {
+function calculateStatistics(arr, metricName = '', options = {}) {
   if (!arr.length) {
     return {
       max: NaN, min: NaN, avg: NaN, median: NaN, mode: NaN, stdev: NaN,
       p1: NaN, p01: NaN, p001: NaN,
-      low1: NaN, low01: NaN, low001: NaN
+      low1: NaN, low01: NaN, low001: NaN,
+      high1: NaN, high01: NaN
     };
   }
 
@@ -331,12 +378,15 @@ function calculateStatistics(arr, metricName = '') {
     return {
       max: aggregate, min: aggregate, avg: aggregate, median: aggregate, mode: aggregate, stdev: 0,
       p1: aggregate, p01: aggregate, p001: aggregate,
-      low1: aggregate, low01: aggregate, low001: aggregate
+      low1: aggregate, low01: aggregate, low001: aggregate,
+      high1: aggregate, high01: aggregate
     };
   }
 
   /* -------- basic aggregates --------------------------------------- */
-  const sorted = [...arr].sort((a, b) => a - b);  // ascending
+  const sorted = Array.isArray(options.sorted)
+    ? options.sorted
+    : [...arr].sort((a, b) => a - b);  // ascending
   const n      = sorted.length;
   const maxVal = sorted[n - 1];
   const minVal = sorted[0];
@@ -378,19 +428,23 @@ function calculateStatistics(arr, metricName = '') {
   const c01  = Math.max(1, Math.ceil(n * 0.001));    // 0.1 %
   const c001 = Math.max(1, Math.ceil(n * 0.0001));   // 0.01 %
 
-  let low1, low01, low001;
+  let low1, low01, low001, high1, high01;
 
   if (isFpsMetric) {
-    // worst FPS = smallest values (array head)
+    // Worst FPS = smallest values; best FPS = largest values.
     low1   = sorted.slice(0, c1).  reduce((s, v) => s + v, 0) / c1;
     low01  = sorted.slice(0, c01). reduce((s, v) => s + v, 0) / c01;
     low001 = sorted.slice(0, c001).reduce((s, v) => s + v, 0) / c001;
+    high1  = sorted.slice(-c1).    reduce((s, v) => s + v, 0) / c1;
+    high01 = sorted.slice(-c01).   reduce((s, v) => s + v, 0) / c01;
   } else {
-    // worst frame‑times = largest values (array tail)
+    // Worst frame times = largest values; best frame times = smallest values.
     const desc = [...sorted].reverse();
     low1   = desc.slice(0, c1).  reduce((s, v) => s + v, 0) / c1;
     low01  = desc.slice(0, c01). reduce((s, v) => s + v, 0) / c01;
     low001 = desc.slice(0, c001).reduce((s, v) => s + v, 0) / c001;
+    high1  = sorted.slice(0, c1).  reduce((s, v) => s + v, 0) / c1;
+    high01 = sorted.slice(0, c01). reduce((s, v) => s + v, 0) / c01;
   }
 
   /* -------- return -------------------------------------------------- */
@@ -402,7 +456,8 @@ function calculateStatistics(arr, metricName = '') {
     mode,
     stdev,
     p1,  p01,  p001,
-    low1, low01, low001
+    low1, low01, low001,
+    high1, high01
   };
 }
 
@@ -467,22 +522,67 @@ function calculateMode(values) {
   return sorted[lo + 1];
 }
 
+function isTimingMetric(metric) {
+  return metric === 'FrameTime' || metric === 'DisplayedFrameTime' || /^Ms/i.test(metric || '');
+}
+
+/**
+ * Shared validity rule for every metric consumer (Statistics, Reliability,
+ * and charts). All metrics reject NaN/Infinity; timing values must be > 0.
+ */
+function isValidMetricSample(metric, value) {
+  if (!Number.isFinite(value)) return false;
+  return !isTimingMetric(metric) || value > 0;
+}
+
 function collectFrametimeSeries(dataset) {
   return dataset.rows
     .map(r => getMetricValue(r, 'FrameTime'))
-    .filter(v => typeof v === 'number' && v > 0);
+    .filter(v => isValidMetricSample('FrameTime', v));
+}
+
+function collectDisplayedFrametimeSeries(dataset) {
+  return dataset.rows
+    .map(r => getMetricValue(r, 'DisplayedFrameTime'))
+    .filter(v => isValidMetricSample('DisplayedFrameTime', v));
+}
+
+function collectAggregateMetricSeries(dataset, metric) {
+  if (metric.startsWith('Displayed_') && AGGREGATE_FRAMETIME_METRICS.has(metric)) {
+    return collectDisplayedFrametimeSeries(dataset);
+  }
+  if (AGGREGATE_FRAMETIME_METRICS.has(metric)) {
+    return collectFrametimeSeries(dataset);
+  }
+  return [];
 }
 
 /**
  * Collects the numeric series used to compute stats for a metric on a dataset.
+ * Timing metrics reject non-positive samples; all metrics reject NaN/Infinity.
  */
 function collectMetricValues(dataset, metric) {
   if (AGGREGATE_FRAMETIME_METRICS.has(metric)) {
-    return collectFrametimeSeries(dataset);
+    return collectAggregateMetricSeries(dataset, metric);
   }
   return dataset.rows
     .map(r => getMetricValue(r, metric))
-    .filter(v => typeof v === 'number');
+    .filter(v => isValidMetricSample(metric, v));
+}
+
+const PERCENT_AGGREGATE_METRICS = new Set([
+  'Coefficient_of_Variation',
+  'Stepwise_Relative_SD',
+  'Rendered_Coefficient_of_Variation',
+  'Displayed_Coefficient_of_Variation',
+  'Rendered_Stepwise_Relative_SD',
+  'Displayed_Stepwise_Relative_SD'
+]);
+
+function formatAggregateDisplayValue(metric, value) {
+  if (!Number.isFinite(value)) return 'N/A';
+  if (PERCENT_AGGREGATE_METRICS.has(metric)) return `${(value * 100).toFixed(2)}%`;
+  return formatStatValue(metric, 'avg', value);
 }
 
 function getPositiveValuesForHarmonicMean(values) {
@@ -502,85 +602,15 @@ function averageForMetric(values, metric) {
   return values.reduce((s, v) => s + v, 0) / values.length;
 }
 
-/**
- * Builds the summary cards shown above the results table.
- * @param {Array} selectedDatasets
- */
-function renderStatsSummary(selectedDatasets) {
-  const summaryEl = document.getElementById('statsSummary');
-  if (!summaryEl) return;
-
-  const cards = selectedDatasets.map((dataset, index) => {
-    const rendered = collectMetricValues(dataset, 'RenderedFPS');
-    const displayed = collectMetricValues(dataset, 'DisplayedFPS');
-    const gpuBusy = collectMetricValues(dataset, 'MsGPUBusy');
-    const untilDisplayed = collectMetricValues(dataset, 'MsUntilDisplayed');
-    const frametimes = collectMetricValues(dataset, 'Stepwise_Relative_SD');
-
-    const renderedAvg = averageForMetric(rendered, 'RenderedFPS');
-    const displayedAvg = averageForMetric(displayed, 'DisplayedFPS');
-    const gpuAvg = averageForMetric(gpuBusy, 'MsGPUBusy');
-    const untilAvg = averageForMetric(untilDisplayed, 'MsUntilDisplayed');
-    const srsd = calculateStepwiseRelativeSD(frametimes);
-
-    const color = getStatsDatasetColor(dataset, index);
-
-    return `
-      <div class="stats-summary-card" style="--card-accent:${color}">
-        <div class="stats-summary-name" title="${dataset.name}">${dataset.name}</div>
-        <div class="stats-summary-metrics">
-          ${summaryMetric('Rendered FPS', Number.isFinite(renderedAvg) ? renderedAvg.toFixed(1) : 'N/A')}
-          ${summaryMetric('Displayed FPS', Number.isFinite(displayedAvg) ? displayedAvg.toFixed(1) : 'N/A')}
-          ${summaryMetric('MsGPUBusy', Number.isFinite(gpuAvg) ? gpuAvg.toFixed(2) : 'N/A', 'ms')}
-          ${summaryMetric('MsUntilDisplayed', Number.isFinite(untilAvg) ? untilAvg.toFixed(2) : 'N/A', 'ms')}
-          ${summaryMetric('Stepwise Rel. SD', Number.isFinite(srsd) ? srsd.toFixed(4) : 'N/A')}
-        </div>
-        ${renderFPSGapNote(renderedAvg, displayedAvg)}
-      </div>
-    `;
-  }).join('');
-
-  summaryEl.innerHTML = cards;
-}
-
-function summaryMetric(label, value, unit = '') {
-  return `
-    <div class="stats-summary-metric">
-      <span class="stats-summary-label">${label}</span>
-      <span class="stats-summary-value">${value}${unit ? `<span class="stats-summary-unit"> ${unit}</span>` : ''}</span>
-    </div>
-  `;
-}
-
-/**
- * Describes the gap between rendered and displayed FPS, which flags GPU/driver
- * frame processing overhead rather than a CPU bottleneck.
- */
-function renderFPSGapNote(renderedAvg, displayedAvg) {
-  if (!Number.isFinite(renderedAvg) || !Number.isFinite(displayedAvg)) return '';
-
-  const gap = renderedAvg - displayedAvg;
-  let cls = 'neutral';
-  let text = 'Rendered and displayed FPS are closely matched.';
-
-  if (gap > 2) {
-    cls = 'warn';
-    text = `Rendered exceeds displayed by ${gap.toFixed(1)} FPS. Possible GPU/driver processing overhead.`;
-  } else if (gap < -0.5) {
-    cls = 'good';
-    text = `Displayed exceeds rendered by ${Math.abs(gap).toFixed(1)} FPS.`;
-  }
-
-  return `<div class="stats-gap-note ${cls}">${text}</div>`;
-}
-
 const PERCENTILE_SUPPORT_DIAGNOSTICS = [
   { key: 'p1', label: '1%ile', fraction: 0.01 },
   { key: 'p01', label: '0.1%ile', fraction: 0.001 },
   { key: 'p001', label: '0.01%ile', fraction: 0.0001 },
   { key: 'low1', label: '1% Low', fraction: 0.01 },
   { key: 'low01', label: '0.1% Low', fraction: 0.001 },
-  { key: 'low001', label: '0.01% Low', fraction: 0.0001 }
+  { key: 'low001', label: '0.01% Low', fraction: 0.0001 },
+  { key: 'high1', label: '99% High', fraction: 0.01 },
+  { key: 'high01', label: '99.9% High', fraction: 0.001 }
 ];
 
 /**
@@ -610,15 +640,21 @@ function calculateLagAutocorrelation(values, lag = 1) {
 /**
  * Computes the usual normal-approximation CI and a conservative AR(1)
  * effective-sample-size correction based on lag-1 autocorrelation.
+ * FPS-family intervals use the harmonic mean as their center, but their sample
+ * variance follows the Statistics STDEV convention and is measured around the
+ * arithmetic mean.
  */
-function calculateAutocorrelationCorrectedCI(values) {
+function calculateAutocorrelationCorrectedCI(values, metric = 'FrameTime') {
   const series = (values || []).filter(Number.isFinite);
   const n = series.length;
   if (n < 2) return null;
 
-  const mean = series.reduce((sum, value) => sum + value, 0) / n;
+  const mean = averageForMetric(series, metric);
+  if (!Number.isFinite(mean)) return null;
+
+  const varianceCenter = series.reduce((sum, value) => sum + value, 0) / n;
   const variance = series.reduce((sum, value) => {
-    const diff = value - mean;
+    const diff = value - varianceCenter;
     return sum + diff * diff;
   }, 0) / (n - 1);
   const stdev = Math.sqrt(variance);
@@ -637,6 +673,7 @@ function calculateAutocorrelationCorrectedCI(values) {
   return {
     n,
     mean,
+    meanKind: isFpsLikeMetric(metric) ? 'harmonic' : 'arithmetic',
     stdev,
     r1,
     effectiveN,
@@ -766,14 +803,16 @@ function formatMetricInterval(interval, metric) {
   return `[${lo.toFixed(3)}, ${hi.toFixed(3)}]`;
 }
 
-function formatMetricMean(mean, metric) {
+function formatMetricMean(mean, metric, meanKind) {
+  const kind = meanKind || (isFpsLikeMetric(metric || '') ? 'harmonic' : 'arithmetic');
+  const label = kind === 'harmonic' ? 'Harmonic mean' : 'Mean';
   if (isFpsLikeMetric(metric || '')) {
-    return `Mean: ${mean.toFixed(2)} FPS`;
+    return `${label}: ${mean.toFixed(2)} FPS`;
   }
   if (!metric || metric === 'FrameTime' || /^Ms/i.test(metric) || /time|latency|ms/i.test(metric)) {
-    return `Mean: ${mean.toFixed(3)} ms`;
+    return `${label}: ${mean.toFixed(3)} ms`;
   }
-  return `Mean: ${mean.toFixed(3)}`;
+  return `${label}: ${mean.toFixed(3)}`;
 }
 
 function formatFrametimeInterval(interval) {
@@ -784,7 +823,7 @@ function renderConfidenceIntervalDiagnostics(container, series, metric = 'FrameT
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
   section.appendChild(makeDiagnosticsElement('h4', '', 'Mean (95% CI)'));
 
-  const result = calculateAutocorrelationCorrectedCI(series);
+  const result = calculateAutocorrelationCorrectedCI(series, metric);
   if (!result) {
     section.appendChild(makeDiagnosticsElement(
       'p',
@@ -798,7 +837,7 @@ function renderConfidenceIntervalDiagnostics(container, series, metric = 'FrameT
   section.appendChild(makeDiagnosticsElement(
     'div',
     'stats-diagnostic-primary',
-    formatMetricMean(result.mean, metric)
+    formatMetricMean(result.mean, metric, result.meanKind)
   ));
 
   const ciGrid = makeDiagnosticsElement('div', 'stats-ci-grid');
@@ -885,21 +924,24 @@ function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime') {
 let latestStatsExportState = null;
 
 function getMetricExportUnit(metric) {
-  if (metric === 'FPS' || metric === 'RenderedFPS' || metric === 'DisplayedFPS') return 'fps';
-  if (metric === 'FrameTime' || /^Ms/i.test(metric)) return 'ms';
+  if (['FPS', 'RenderedFPS', 'DisplayedFPS'].includes(metric)) return 'fps';
+  if (metric === 'FrameTime' || metric === 'DisplayedFrameTime' || /^Ms/i.test(metric)) return 'ms';
+  if (['Rendered_FTSD', 'Displayed_FTSD', 'Rendered_RMSSD', 'Displayed_RMSSD'].includes(metric)) return 'ms';
+  if (PERCENT_AGGREGATE_METRICS.has(metric)) return 'ratio';
   if (metric.includes('Util')) return 'percent';
   return 'value';
 }
 
-function buildExportReliabilityDiagnostics(dataset, selectedStats, metric = 'FrameTime') {
-  const series = collectMetricValues(dataset, metric);
+function buildExportReliabilityDiagnostics(dataset, selectedStats, metric = 'FrameTime', seriesOverride = null) {
+  const series = Array.isArray(seriesOverride)
+    ? seriesOverride
+    : collectMetricValues(dataset, metric);
   const lag1 = calculateLagAutocorrelation(series, 1);
-  const confidenceInterval = calculateAutocorrelationCorrectedCI(series);
-  const selectedStatSet = new Set(selectedStats);
+  const confidenceInterval = calculateAutocorrelationCorrectedCI(series, metric);
   const percentileSupport = {};
 
-  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ key, label, fraction }) => {
-    if (!selectedStatSet.has(key)) return;
+  // Match Reliability UI: always include all percentile-support diagnostics.
+  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ label, fraction }) => {
     const expectedFrames = series.length * fraction;
     const status = getPercentileSupportStatus(expectedFrames);
     percentileSupport[label] = {
@@ -912,14 +954,16 @@ function buildExportReliabilityDiagnostics(dataset, selectedStats, metric = 'Fra
     basedOnMetric: typeof window.getMetricDisplayName === 'function'
       ? window.getMetricDisplayName(metric)
       : metric,
+    basedOnMetricKey: metric,
     validSampleCount: series.length,
-    validFrametimeCount: series.length,
     lagOneAutocorrelationCoefficient: Number.isFinite(lag1) ? lag1 : null,
     autocorrelationInterpretation: interpretAutocorrelation(lag1),
     percentileSampleSupport: percentileSupport,
     autocorrelationCorrected95PercentConfidenceInterval: confidenceInterval
       ? {
           unit: getMetricExportUnit(metric),
+          mean: confidenceInterval.mean,
+          meanKind: confidenceInterval.meanKind,
           lower: confidenceInterval.corrected[0],
           upper: confidenceInterval.corrected[1],
           effectiveSampleSize: confidenceInterval.effectiveN
@@ -955,6 +999,7 @@ function buildStatsJsonExport(state = latestStatsExportState) {
   return {
     exportSource: 'Frame Timing Analyzer',
     generatedAt: state.generatedAt,
+    diagnosticsMetric: state.diagnosticsMetric || null,
     datasets: state.datasets.map(entry => {
       const stats = {};
       state.metrics.forEach(metric => {
@@ -1016,7 +1061,10 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
         const statLabel = stat === 'aggregateValue'
           ? 'Value'
           : getStatDisplayName(stat, [metric]);
-        return `${escapeMarkdown(statLabel)}: ${formatStatValue(metric, stat, value)}`;
+        const formatted = stat === 'aggregateValue'
+          ? formatAggregateDisplayValue(metric, value)
+          : formatStatValue(metric, stat, value);
+        return `${escapeMarkdown(statLabel)}: ${formatted}`;
       }).join('; ');
     });
     lines.push(`| ${escapeMarkdown(metricLabel)} | ${cells.join(' | ')} |`);
@@ -1120,12 +1168,59 @@ function downloadStatsAsJson() {
   window.notify?.('Statistics JSON downloaded.', 'success');
 }
 
+function resolveCssColor(customProperty, fallback = '#1a1a1a') {
+  const probe = document.createElement('div');
+  probe.style.cssText = `position:fixed;left:-9999px;visibility:hidden;background:var(${customProperty})`;
+  document.body.appendChild(probe);
+  const color = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  return color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent' ? color : fallback;
+}
+
+async function exportStatsAsPng() {
+  const toPng = window.htmlToImage?.toPng;
+  if (typeof toPng !== 'function') {
+    window.notify?.('PNG export library failed to load. Check your connection and reload.', 'error');
+    return;
+  }
+  const target = document.querySelector('.stats-tables-stack');
+  if (!target || !latestStatsExportState) {
+    window.notify?.('Calculate statistics before exporting.', 'warning');
+    return;
+  }
+
+  window.notify?.('Rendering PNG…', 'info');
+
+  try {
+    const bg = resolveCssColor('--bg', '#1a1a1a');
+    const url = await toPng(target, {
+      backgroundColor: bg,
+      pixelRatio: 2,
+      cacheBust: true
+    });
+
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.href = url;
+    link.download = `frametime-stats-export-${timestamp}.png`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.notify?.('Statistics exported as PNG.', 'success');
+  } catch (error) {
+    window.notify?.(`Could not export PNG: ${error.message}`, 'error');
+  }
+}
+
 /**
  * Resets the Statistics panel to its empty state (used on clear-all).
  */
 function resetStatsPanel() {
   const statsContent = document.getElementById('statistics');
   if (statsContent) statsContent.classList.add('empty-stats');
+  const statusLine = document.getElementById('statsStatusLine');
+  if (statusLine) statusLine.textContent = '';
 
   const statsTable = document.getElementById('statsTable');
   if (statsTable) {
@@ -1158,11 +1253,33 @@ function setStatsExportVisible(visible) {
   el.setAttribute('aria-hidden', visible ? 'false' : 'true');
 }
 
+function updateStatsTable() {
+  const calcBtn = document.getElementById('calculateStatsBtn');
+  const statsContent = document.getElementById('statistics');
+  const statusLine = document.getElementById('statsStatusLine');
+  if (calcBtn) {
+    calcBtn.disabled = true;
+    calcBtn.setAttribute('aria-busy', 'true');
+  }
+  statsContent?.setAttribute('aria-busy', 'true');
+  if (statusLine) statusLine.textContent = 'Calculating statistics.';
+
+  try {
+    updateStatsTableCore();
+  } finally {
+    if (calcBtn) {
+      calcBtn.disabled = false;
+      calcBtn.removeAttribute('aria-busy');
+    }
+    statsContent?.removeAttribute('aria-busy');
+  }
+}
+
 /**
  * Updates the Statistics table (#statsTable) by computing stats for each selected metric,
  * for all selected datasets in the statDatasetSelect dropdown.
  */
-function updateStatsTable() {
+function updateStatsTableCore() {
   const statsContent = document.getElementById('statistics');
   const selectedDatasetIndices = (typeof window.getDatasetPickerIndices === 'function'
     ? window.getDatasetPickerIndices('statDatasetSelect')
@@ -1197,18 +1314,42 @@ function updateStatsTable() {
   statsContent.classList.remove('empty-stats');
   setStatsExportVisible(true);
 
+  // Diagnostics metric is explicit from Statistics context: prefer FrameTime,
+  // else the first regular metric selected — never the Reliability-tab control.
+  const diagnosticsMetric = regularMetrics.includes('RenderedFPS')
+    ? 'RenderedFPS'
+    : (regularMetrics[0] || selectedMetrics[0] || 'RenderedFPS');
+
   const exportState = {
     generatedAt: new Date().toISOString(),
     metrics: selectedMetrics.slice(),
     regularMetrics: regularMetrics.slice(),
     aggregateMetrics: aggregateMetrics.slice(),
-    reliabilityMetric: document.getElementById('reliabilityMetricSelect')?.value || 'FrameTime',
+    diagnosticsMetric,
     selectedStats: selectedStats.slice(),
     datasets: selectedDatasets.map(dataset => ({
       dataset,
       stats: {},
       reliabilityDiagnostics: null
     }))
+  };
+
+  const metricSeriesCache = new Map();
+  const sortedSeriesCache = new Map();
+  const cacheKey = (dataset, metric) => `${dataset.id ?? dataset.name}::${metric}`;
+  const cachedCollect = (dataset, metric) => {
+    const key = cacheKey(dataset, metric);
+    if (!metricSeriesCache.has(key)) {
+      metricSeriesCache.set(key, collectMetricValues(dataset, metric));
+    }
+    return metricSeriesCache.get(key);
+  };
+  const cachedSorted = (dataset, metric) => {
+    const key = cacheKey(dataset, metric);
+    if (!sortedSeriesCache.has(key)) {
+      sortedSeriesCache.set(key, cachedCollect(dataset, metric).slice().sort((a, b) => a - b));
+    }
+    return sortedSeriesCache.get(key);
   };
 
   const mainWrap = document.getElementById('statsMainTableWrap');
@@ -1222,9 +1363,9 @@ function updateStatsTable() {
     if (mainWrap) mainWrap.classList.remove('hidden');
 
     const headerRow = document.createElement('tr');
-    headerRow.innerHTML = '<th class="stats-corner">Metric</th><th>Dataset</th>';
+    headerRow.innerHTML = '<th class="stats-corner" scope="col">Metric</th><th scope="col">Dataset</th>';
     selectedStats.forEach(stat => {
-      headerRow.innerHTML += `<th>${getStatDisplayName(stat, regularMetrics)}</th>`;
+      headerRow.innerHTML += `<th scope="col">${getStatDisplayName(stat, regularMetrics)}</th>`;
     });
     thead.appendChild(headerRow);
 
@@ -1232,11 +1373,11 @@ function updateStatsTable() {
 
     regularMetrics.forEach(metric => {
       const datasetStats = selectedDatasets.map((dataset, dsIdx) => {
-        const values = collectMetricValues(dataset, metric);
+        const values = cachedCollect(dataset, metric);
         return {
           name: dataset.name,
           color: getStatsDatasetColor(dataset, dsIdx),
-          stats: calculateStatistics(values, metric)
+          stats: calculateStatistics(values, metric, { sorted: cachedSorted(dataset, metric) })
         };
       });
       datasetStats.forEach((datasetResult, datasetIndex) => {
@@ -1257,16 +1398,19 @@ function updateStatsTable() {
         rowIndex++;
 
         if (dsIndex === 0) {
-          const metricCell = document.createElement('td');
+          const metricCell = document.createElement('th');
           metricCell.className = 'stats-metric-cell';
+          metricCell.scope = 'rowgroup';
           metricCell.rowSpan = datasetStats.length;
           metricCell.textContent = metricLabel;
           metricCell.title = getMetricDisplayName(metric);
+          metricCell.setAttribute('aria-label', getMetricDisplayName(metric));
           row.appendChild(metricCell);
         }
 
-        const nameCell = document.createElement('td');
+        const nameCell = document.createElement('th');
         nameCell.className = 'dataset-name-cell stats-row-stripe';
+        nameCell.scope = 'row';
         nameCell.style.setProperty('--stripe', dsStats.color || getDatasetColor(dsIndex));
         nameCell.textContent = dsStats.name;
         row.appendChild(nameCell);
@@ -1281,8 +1425,15 @@ function updateStatsTable() {
             const higherIsBetter = isFpsMetric && stat !== 'stdev';
             const best = higherIsBetter ? Math.max(...allValues) : Math.min(...allValues);
             const worst = higherIsBetter ? Math.min(...allValues) : Math.max(...allValues);
-            if (value === best) cell.classList.add('dataset-better-value');
-            else if (value === worst) cell.classList.add('dataset-worse-value');
+            if (value === best) {
+              cell.classList.add('dataset-better-value');
+              cell.title = 'Best value in this comparison';
+              cell.setAttribute('aria-label', `${cell.textContent}, best value in this comparison`);
+            } else if (value === worst) {
+              cell.classList.add('dataset-worse-value');
+              cell.title = 'Worst value in this comparison';
+              cell.setAttribute('aria-label', `${cell.textContent}, worst value in this comparison`);
+            }
           }
 
           row.appendChild(cell);
@@ -1303,7 +1454,8 @@ function updateStatsTable() {
       entry.reliabilityDiagnostics = buildExportReliabilityDiagnostics(
         entry.dataset,
         selectedStats,
-        exportState.reliabilityMetric
+        diagnosticsMetric,
+        cachedCollect(entry.dataset, diagnosticsMetric)
       );
     });
     latestStatsExportState = exportState;
@@ -1316,6 +1468,14 @@ function updateStatsTable() {
   }
 
   setStatsExportVisible(true);
+  const statusLine = document.getElementById('statsStatusLine');
+  if (statusLine) {
+    const metricLabel = selectedMetrics.length === 1 ? 'metric' : 'metrics';
+    const datasetLabel = selectedDatasets.length === 1 ? 'dataset' : 'datasets';
+    statusLine.textContent =
+      `Statistics updated: ${selectedMetrics.length} ${metricLabel} across ` +
+      `${selectedDatasets.length} ${datasetLabel}.`;
+  }
 }
 
 /**
@@ -1336,7 +1496,7 @@ function syncStatsTablesSeparation() {
   if (statsPage) statsPage.classList.toggle('stats-has-both-tables', bothVisible);
   if (divider) {
     divider.classList.toggle('hidden', !bothVisible);
-    divider.setAttribute('aria-hidden', bothVisible ? 'false' : 'true');
+    divider.setAttribute('aria-hidden', 'true');
   }
 }
 
@@ -1357,12 +1517,22 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
   tbody.innerHTML = '';
 
   const headerRow = document.createElement('tr');
-  headerRow.innerHTML = '<th class="stats-corner">Metric</th>';
+  headerRow.innerHTML = '<th class="stats-corner" scope="col">Metric</th>';
   selectedDatasets.forEach((ds, i) => {
     const th = document.createElement('th');
     th.className = 'stats-dataset-header';
+    th.scope = 'col';
     th.title = ds.name;
-    th.innerHTML = `<span class="stats-header-stripe" style="--stripe:${getStatsDatasetColor(ds, i)}"></span><span class="stats-header-name">${ds.name}</span>`;
+
+    const stripe = document.createElement('span');
+    stripe.className = 'stats-header-stripe';
+    stripe.style.setProperty('--stripe', getStatsDatasetColor(ds, i));
+
+    const name = document.createElement('span');
+    name.className = 'stats-header-name';
+    name.textContent = ds.name;
+
+    th.append(stripe, name);
     headerRow.appendChild(th);
   });
   thead.appendChild(headerRow);
@@ -1377,13 +1547,24 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
       : getMetricDisplayName(metric);
     const desc = getMetricDescription(metric);
 
-    const metricCell = document.createElement('td');
+    const metricCell = document.createElement('th');
     metricCell.className = 'stats-metric-cell stats-aggregate-metric';
-    metricCell.innerHTML = `<span class="stats-aggregate-name">${metricLabel}</span>${desc ? `<span class="stats-aggregate-hint">${desc}</span>` : ''}`;
+    metricCell.scope = 'row';
+    metricCell.setAttribute('aria-label', getMetricDisplayName(metric));
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'stats-aggregate-name';
+    nameSpan.textContent = metricLabel;
+    metricCell.appendChild(nameSpan);
+    if (desc) {
+      const hint = document.createElement('span');
+      hint.className = 'stats-aggregate-hint';
+      hint.textContent = desc;
+      metricCell.appendChild(hint);
+    }
     row.appendChild(metricCell);
 
     const values = selectedDatasets.map(ds =>
-      calculateAggregateMetric(collectFrametimeSeries(ds), metric)
+      calculateAggregateMetric(collectAggregateMetricSeries(ds, metric), metric)
     );
     values.forEach((value, datasetIndex) => {
       if (!exportState?.datasets[datasetIndex]) return;
@@ -1395,7 +1576,7 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
     values.forEach((value, dsIndex) => {
       const cell = document.createElement('td');
       cell.className = 'stats-aggregate-value';
-      cell.textContent = formatStatValue(metric, 'avg', value);
+      cell.textContent = formatAggregateDisplayValue(metric, value);
 
       if (selectedDatasets.length > 1 && Number.isFinite(value)) {
         const useLowerIsBetter = !['Skewness', 'Kurtosis', 'Nonparametric_Skew'].includes(metric);
@@ -1403,8 +1584,15 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
           const finite = values.filter(Number.isFinite);
           const best = Math.min(...finite);
           const worst = Math.max(...finite);
-          if (value === best) cell.classList.add('dataset-better-value');
-          else if (value === worst) cell.classList.add('dataset-worse-value');
+          if (value === best) {
+            cell.classList.add('dataset-better-value');
+            cell.title = 'Best value in this comparison';
+            cell.setAttribute('aria-label', `${cell.textContent}, best value in this comparison`);
+          } else if (value === worst) {
+            cell.classList.add('dataset-worse-value');
+            cell.title = 'Worst value in this comparison';
+            cell.setAttribute('aria-label', `${cell.textContent}, worst value in this comparison`);
+          }
         }
       }
 
@@ -1412,67 +1600,6 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
     });
 
     tbody.appendChild(row);
-  });
-}
-
-// Chart.js instance for statistics visualization
-let statsChart = null;
-
-/**
- * Visualizes selected statistics in a simple bar chart.
- * Uses the first enabled statistic across chosen metrics and datasets.
- */
-function visualizeStatistics() {
-  const container = document.getElementById('statsVisualizationContainer');
-  const canvas = document.getElementById('statsChart');
-  if (!container || !canvas) return;
-
-  const datasetIndices = typeof window.getDatasetPickerIndices === 'function'
-    ? window.getDatasetPickerIndices('statDatasetSelect')
-    : [];
-  if (!datasetIndices.length) {
-    window.notify?.('Select datasets to visualize statistics', 'warning');
-    return;
-  }
-
-  const metrics = Array.from(document.querySelectorAll('#statMetricsGroup .toggle-button.active')).map(btn => btn.dataset.metric);
-  const stats = Array.from(document.querySelectorAll('#statsTypeGroup .toggle-button.active')).map(btn => btn.dataset.stat);
-
-  if (!metrics.length || !stats.length) {
-    window.notify?.('Select metrics and stats', 'warning');
-    return;
-  }
-
-  const statKey = stats[0];
-  const chartLabels = metrics.slice();
-  const chartDatasets = datasetIndices.map((idx, i) => {
-    const ds = window.allDatasets[idx];
-    const data = metrics.map(metric => {
-      const values = ds.rows.map(r => getMetricValue(r, metric)).filter(v => typeof v === 'number');
-      const statObj = calculateStatistics(values, metric);
-      return statObj[statKey];
-    });
-    const color = typeof randomColor === 'function' ? randomColor() : `hsl(${(i * 70) % 360},70%,50%)`;
-    return { label: `${ds.name} (${statKey})`, data, backgroundColor: color };
-  });
-
-  container.classList.remove('hidden');
-
-  if (statsChart) statsChart.destroy();
-
-  statsChart = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels: chartLabels,
-      datasets: chartDatasets
-    },
-    options: {
-      responsive: true,
-      scales: {
-        x: { title: { display: true, text: 'Metric' } },
-        y: { title: { display: true, text: getStatDisplayName(statKey, metrics) } }
-      }
-    }
   });
 }
 
@@ -1494,7 +1621,9 @@ function getStatDisplayName(stat, metrics = []) {
     'p001': '0.01% Percentile',
     'low1': '1% Low',
     'low01': '0.1% Low',
-    'low001': '0.01% Low'
+    'low001': '0.01% Low',
+    'high1': '99% High',
+    'high01': '99.9% High'
   };
   
   return displayNames[stat] || stat;
@@ -1519,17 +1648,23 @@ function getStatDescription(stat) {
     'p001': 'Tail percentile cutoff for the worst 0.01% of samples.',
     'low1': 'Average of the worst 1% of samples.',
     'low01': 'Average of the worst 0.1% of samples.',
-    'low001': 'Average of the worst 0.01% of samples.'
+    'low001': 'Average of the worst 0.01% of samples.',
+    'high1': 'Average of the best 1% of samples (fastest frames / highest FPS).',
+    'high01': 'Average of the best 0.1% of samples (fastest frames / highest FPS).'
   };
   return descriptions[stat] || '';
 }
 
 // Expose these to the global scope:
 window.collectMetricValues = collectMetricValues;
+window.isValidMetricSample = isValidMetricSample;
 window.getMetricValue = getMetricValue;
 window.calculateStepwiseRelativeSD = calculateStepwiseRelativeSD;
 window.calculateCoefficientOfVariation = calculateCoefficientOfVariation;
 window.calculateRMSSD = calculateRMSSD;
+window.calculateFrameTimeSD = calculateFrameTimeSD;
+window.collectDisplayedFrametimeSeries = collectDisplayedFrametimeSeries;
+window.formatAggregateDisplayValue = formatAggregateDisplayValue;
 window.calculateDistributionShape = calculateDistributionShape;
 window.calculateStatistics = calculateStatistics;
 window.calculatePercentile = calculatePercentile;
@@ -1541,7 +1676,6 @@ window.updateStatsTable = updateStatsTable;
 window.resetStatsPanel = resetStatsPanel;
 window.formatStatValue = formatStatValue;
 window.getDatasetColor = getDatasetColor;
-window.visualizeStatistics = visualizeStatistics;
 window.getStatDisplayName = getStatDisplayName;
 window.getStatDescription = getStatDescription;
 window.updateStatsAverageLabel = updateStatsAverageLabel;
@@ -1549,3 +1683,4 @@ window.buildStatsMarkdownExport = buildStatsMarkdownExport;
 window.buildStatsJsonExport = buildStatsJsonExport;
 window.copyStatsAsMarkdown = copyStatsAsMarkdown;
 window.downloadStatsAsJson = downloadStatsAsJson;
+window.exportStatsAsPng = exportStatsAsPng;
