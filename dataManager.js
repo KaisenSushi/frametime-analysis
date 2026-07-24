@@ -116,17 +116,17 @@ const noCommonMetricsNotifiedSelections = new Set();
 
 // Grouping for the Statistics sidebar metric chips.
 const STATS_METRIC_GROUPS = [
-  { label: 'Performance — Rendered', metrics: ['RenderedFPS', 'MsBetweenPresents'] },
-  { label: 'Performance — Displayed', metrics: ['DisplayedFPS', 'MsBetweenDisplayChange'] },
+  { label: 'Performance - Rendered', metrics: ['RenderedFPS', 'MsBetweenPresents'] },
+  { label: 'Performance - Displayed', metrics: ['DisplayedFPS', 'MsBetweenDisplayChange'] },
   {
-    label: 'Smoothness — Rendered',
+    label: 'Smoothness - Rendered',
     metrics: [
       'Rendered_FTSD', 'Rendered_Coefficient_of_Variation',
       'Rendered_RMSSD', 'Rendered_Stepwise_Relative_SD'
     ]
   },
   {
-    label: 'Smoothness — Displayed',
+    label: 'Smoothness - Displayed',
     metrics: [
       'Displayed_FTSD', 'Displayed_Coefficient_of_Variation',
       'Displayed_RMSSD', 'Displayed_Stepwise_Relative_SD'
@@ -647,9 +647,11 @@ function numericColumnsForDataset(ds) {
     numeric.add('Rendered_Coefficient_of_Variation');
     numeric.add('Rendered_RMSSD');
     numeric.add('Rendered_Stepwise_Relative_SD');
-    FRAMETIME_DERIVED_METRICS.forEach(m => {
-      if (!m.startsWith('Displayed_')) numeric.add(m);
-    });
+    // Distribution-shape only - skip legacy RMSSD / CV / Stepwise aliases
+    // (already covered by Rendered_* / Displayed_* metrics above).
+    numeric.add('Skewness');
+    numeric.add('Kurtosis');
+    numeric.add('Nonparametric_Skew');
   }
   if (hasDisplayedFrametimes) {
     numeric.add('Displayed_FTSD');
@@ -969,8 +971,8 @@ function getMetricDisplayName(metric) {
  */
 function getMetricDescription(metric) {
   const descriptions = {
-    'FrameTime': 'Time between app present calls (MsBetweenPresents). Not the same as display cadence — use Displayed FPS for on-screen timing.',
-    'FPS': 'Frames per second from present timing (MsBetweenPresents, harmonic mean). Not display-based — use Displayed FPS for what appears on screen.',
+    'FrameTime': 'Time between app present calls (MsBetweenPresents). Not the same as display cadence - use Displayed FPS for on-screen timing.',
+    'FPS': 'Frames per second from present timing (MsBetweenPresents, harmonic mean). Not display-based - use Displayed FPS for what appears on screen.',
     'RenderedFPS': 'Frames the GPU submitted for presentation.',
     'DisplayedFPS': 'Frames actually shown on screen. Reveals smoothness loss.',
     'DisplayedFrameTime': 'Time between actual screen refreshes (MsBetweenDisplayChange).',

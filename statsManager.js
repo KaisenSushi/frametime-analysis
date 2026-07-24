@@ -1315,7 +1315,7 @@ function updateStatsTableCore() {
   setStatsExportVisible(true);
 
   // Diagnostics metric is explicit from Statistics context: prefer FrameTime,
-  // else the first regular metric selected — never the Reliability-tab control.
+  // else the first regular metric selected - never the Reliability-tab control.
   const diagnosticsMetric = regularMetrics.includes('RenderedFPS')
     ? 'RenderedFPS'
     : (regularMetrics[0] || selectedMetrics[0] || 'RenderedFPS');

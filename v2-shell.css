@@ -1,0 +1,68 @@
+/* =============================================================================
+   V2 shell structure (sole UI)
+   Visual tokens/components live in v2-theme.css under #appShellV2.
+   ============================================================================= */
+
+.app-shell-v2 {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.v2-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.v2-topbar-brand {
+  min-width: 0;
+}
+
+.v2-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.v2-topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.v2-step-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.v2-step,
+.v2-mode-btn {
+  cursor: pointer;
+}
+
+.v2-page {
+  flex: 1;
+}
+
+.v2-mode {
+  display: block;
+}
+
+.v2-step-panel {
+  display: block;
+}
+
+.v2-back-setup {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}

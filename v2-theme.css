@@ -1,0 +1,1438 @@
+/* =============================================================================
+   V2 theme - BoringBoredom layout language + monochrome accent
+   Scoped under #appShellV2. Accent is grey/white only; red reserved for destructive.
+   ============================================================================= */
+
+#appShellV2 {
+  --v2-bg: #242424;
+  --v2-bg-hover: #2e2e2e;
+  --v2-field: #2e2e2e;
+  --v2-border: #424242;
+  --v2-border-subtle: #3b3b3b;
+  --v2-text: #c9c9c9;
+  --v2-ink: #ffffff;
+  --v2-muted: #909296;
+  /* Monochrome accent: near-white fills + softer grey for switches/focus/nav marks */
+  --v2-accent: oklch(0.92 0 0);
+  --v2-accent-hover: oklch(0.84 0 0);
+  --v2-accent-ink: oklch(0.16 0 0);
+  --v2-accent-muted: oklch(0.7 0 0);
+  --v2-link: oklch(0.82 0 0);
+  --v2-danger: #fa5252;
+  --v2-danger-hover: #e03131;
+  --v2-switch-off: #3b3b3b;
+  --v2-switch-knob: #ffffff;
+  --v2-radius: 8px;
+  --v2-radius-sm: 6px;
+  --v2-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --v2-font: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --v2-switch-w: 38px;
+  --v2-switch-h: 22px;
+  --v2-switch-knob-size: 16px;
+
+  color: var(--v2-text);
+  background: var(--v2-bg);
+  font-family: var(--v2-font);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ----- Top bar + step nav ----- */
+
+#appShellV2 .v2-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--v2-border-subtle);
+  background: var(--v2-bg);
+}
+
+#appShellV2 .v2-topbar-brand .brand-name {
+  display: block;
+  color: var(--v2-ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .v2-topbar-brand .topbar-workspace-title {
+  margin: 2px 0 0;
+  color: var(--v2-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#appShellV2 .v2-mode-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+}
+
+#appShellV2 .v2-mode-btn {
+  border: 0;
+  border-radius: var(--v2-radius-sm);
+  padding: 6px 12px;
+  min-height: 32px;
+  background: transparent;
+  color: var(--v2-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 120ms var(--v2-ease), color 120ms var(--v2-ease);
+}
+
+#appShellV2 .v2-mode-btn:hover {
+  color: var(--v2-ink);
+  background: var(--v2-bg-hover);
+}
+
+#appShellV2 .v2-mode-btn.active {
+  background: var(--v2-accent);
+  color: var(--v2-accent-ink);
+  font-weight: 600;
+}
+
+#appShellV2 .v2-mode-btn:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .v2-topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+#appShellV2 .v2-topbar-link {
+  color: var(--v2-link);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#appShellV2 .v2-topbar-link:hover {
+  color: var(--v2-ink);
+  text-decoration: underline;
+}
+
+#appShellV2 .v2-advanced-slot {
+  display: inline-flex;
+  align-items: center;
+}
+
+#appShellV2 .v2-advanced-slot .advanced-metrics-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--v2-text);
+  font-size: 13px;
+  font-weight: 400;
+  border-radius: 0;
+  min-height: 0;
+  padding: 4px 0;
+  box-shadow: none;
+}
+
+#appShellV2 .v2-advanced-slot .advanced-metrics-toggle[aria-pressed="true"] {
+  color: var(--v2-ink);
+  font-weight: 500;
+}
+
+#appShellV2 .v2-step-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 10px 16px 0;
+  border-bottom: none;
+}
+
+#appShellV2 .v2-step {
+  position: relative;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--v2-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  min-width: 0;
+  min-height: 36px;
+  text-align: left;
+  border-radius: 0;
+  transition: color 120ms var(--v2-ease), border-color 120ms var(--v2-ease);
+}
+
+#appShellV2 .v2-step:first-child,
+#appShellV2 .v2-step:last-of-type {
+  border-radius: 0;
+  margin-left: 0;
+}
+
+#appShellV2 .v2-step.active {
+  z-index: 1;
+  border-color: transparent;
+  border-bottom-color: var(--v2-accent-muted);
+  background: transparent;
+  color: var(--v2-ink);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+#appShellV2 .v2-step:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+  z-index: 2;
+}
+
+#appShellV2 .v2-page {
+  padding: 12px 16px 32px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+#appShellV2 .v2-back-setup {
+  margin-bottom: 12px;
+  color: var(--v2-link);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#appShellV2 .v2-back-setup:hover {
+  color: var(--v2-ink);
+  text-decoration: underline;
+}
+
+/* ----- Type ----- */
+
+#appShellV2 .workbench-head h1 {
+  margin: 0;
+  color: var(--v2-ink);
+  font-family: var(--v2-font);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+#appShellV2 .workspace-kicker {
+  margin: 0 0 4px;
+  color: var(--v2-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#appShellV2 .viz-panel-head h3,
+#appShellV2 .reliability-chart-header h2,
+#appShellV2 .reliability-diagnostics > h2,
+#appShellV2 .stats-aggregate-title,
+#appShellV2 .stats-metric-group-label {
+  color: var(--v2-ink);
+  font-family: var(--v2-font);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-align: left;
+}
+
+#appShellV2 .viz-field,
+#appShellV2 .viz-bar-hint,
+#appShellV2 .panel-meta,
+#appShellV2 .stats-hint {
+  color: var(--v2-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* ----- Setup sections: heading + hairline (no cards) ----- */
+
+#appShellV2 .viz-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#appShellV2 .viz-panel + .viz-panel {
+  margin-top: 20px;
+}
+
+#appShellV2 .v2-setup-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem 1.5rem;
+  align-items: start;
+  width: 100%;
+}
+
+#appShellV2 .v2-setup-columns > .viz-panel,
+#appShellV2 .v2-setup-columns > .v2-tips-column {
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  margin-top: 0;
+}
+
+#appShellV2 .v2-setup-columns > .viz-panel + .viz-panel {
+  margin-top: 0;
+}
+
+/* Keep controls readable - don't stretch form widgets across huge columns */
+#appShellV2 .v2-setup-columns .viz-select,
+#appShellV2 .v2-setup-columns select,
+#appShellV2 .v2-setup-columns input[type="number"],
+#appShellV2 .v2-setup-columns input[type="text"],
+#appShellV2 .v2-setup-columns .file-input-wrapper.viz-drop {
+  max-width: 22rem;
+}
+
+#appShellV2 .v2-setup-columns .accent-button,
+#appShellV2 .v2-setup-columns .stats-calc-btn,
+#appShellV2 .v2-setup-columns .reliability-update-btn,
+#appShellV2 .v2-setup-columns .secondary-button:not(.mini),
+#appShellV2 .v2-setup-columns #clearAllDatasets:not(:disabled),
+#appShellV2 .v2-setup-columns #clearChartBtn:not(:disabled) {
+  max-width: 22rem;
+}
+
+#appShellV2 .v2-tips-column {
+  color: var(--v2-text);
+}
+
+#appShellV2 .v2-tips-text {
+  margin: 0 0 12px;
+  color: var(--v2-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .v2-tips-text:last-child {
+  margin-bottom: 0;
+}
+
+#appShellV2 .stats-sidebar,
+#appShellV2 .reliability-sidebar,
+#appShellV2 .viz-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+#appShellV2 .stats-sidebar > .viz-panel.sidebar-panel--half,
+#appShellV2 .reliability-sidebar > .viz-panel.sidebar-panel--half {
+  grid-column: auto;
+}
+
+#appShellV2 .viz-panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  /* Fixed header band so hairlines share one baseline across columns */
+  height: 2.75rem;
+  min-height: 2.75rem;
+  max-height: 2.75rem;
+  box-sizing: border-box;
+  margin: 0 0 10px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--v2-border);
+  background: transparent;
+  overflow: hidden;
+}
+
+#appShellV2 .viz-panel-head h3 {
+  margin: 0;
+  line-height: 1.25;
+  align-self: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#appShellV2 .viz-panel-head > :not(h3) {
+  justify-self: end;
+  align-self: center;
+  text-align: right;
+  min-width: 0;
+}
+
+#appShellV2 .viz-panel-head .panel-meta,
+#appShellV2 .viz-panel-head .stats-link-row {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 8px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+/* Header actions stay compact links - don't grow into full-width buttons */
+#appShellV2 .viz-panel-head #clearAllDatasets,
+#appShellV2 .viz-panel-head #clearAllDatasets:not(:disabled) {
+  display: inline;
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--v2-link);
+  font-size: 12px;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#appShellV2 .viz-panel-head #clearAllDatasets:not(:disabled) {
+  color: var(--v2-danger);
+}
+
+#appShellV2 .viz-panel-head #clearAllDatasets:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+#appShellV2 .viz-panel-subhead {
+  margin: 0 0 6px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--v2-border-subtle);
+  color: var(--v2-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#appShellV2 .file-input-wrapper.viz-drop {
+  border: 1px dashed var(--v2-border);
+  border-radius: var(--v2-radius-sm);
+  background: transparent;
+  transition: border-color 120ms var(--v2-ease), background 120ms var(--v2-ease);
+}
+
+#appShellV2 .file-input-wrapper.viz-drop:hover,
+#appShellV2 .file-input-wrapper.viz-drop.dragover {
+  border-color: var(--v2-accent-muted);
+  background: color-mix(in oklch, var(--v2-accent-muted) 12%, transparent);
+}
+
+#appShellV2 .viz-drop-title {
+  color: var(--v2-ink);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .viz-select,
+#appShellV2 select,
+#appShellV2 input[type="number"],
+#appShellV2 input[type="text"] {
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-field);
+  color: var(--v2-ink);
+  font-family: var(--v2-font);
+  box-shadow: none;
+}
+
+#appShellV2 .viz-select:focus-visible,
+#appShellV2 select:focus-visible,
+#appShellV2 input:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 1px;
+}
+
+/* ----- Lists: expand with content (no inner scroll clipping Advanced metrics) ----- */
+
+#appShellV2 .stats-metric-groups,
+#appShellV2 .metrics-panel .stats-metric-groups,
+#appShellV2 #datasetSelect,
+#appShellV2 #statDatasetSelect,
+#appShellV2 #reliabilityDatasetSelect,
+#appShellV2 .viz-dataset-picker,
+#appShellV2 .dataset-list,
+#appShellV2 .dataset-list.compact,
+#appShellV2 .stats-dataset-picker,
+#appShellV2 .toggle-group,
+#appShellV2 .toggle-group.compact {
+  max-height: none !important;
+  overflow: visible !important;
+  flex: none;
+  min-height: 0;
+}
+
+/* Undo classic metric-group chrome - flat switch list, no section titles */
+#appShellV2 .stats-metric-group-label {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+#appShellV2 .stats-metric-group {
+  margin-top: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+#appShellV2 .stats-metric-group--rendered,
+#appShellV2 .stats-metric-group--displayed {
+  padding-left: 0;
+  border-left: 0;
+}
+
+/* Results: mode/step nav already names the workspace - drop redundant titles */
+#appShellV2 .v2-step-panel[data-step="results"] .workbench-head {
+  display: none;
+}
+
+#appShellV2 .dataset-list {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  max-height: none;
+  overflow: visible;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#appShellV2 .dataset-list li,
+#appShellV2 .dataset-list.compact li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+#appShellV2 .dataset-list li:hover {
+  background: var(--v2-bg-hover);
+  border-color: transparent;
+}
+
+#appShellV2 .dataset-list-stripe {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-self: center;
+  border-radius: 999px;
+}
+
+#appShellV2 .dataset-list-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--v2-text);
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .dataset-remove-btn {
+  border: 0;
+  background: transparent;
+  color: var(--v2-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+#appShellV2 .dataset-remove-btn:hover {
+  color: var(--v2-danger);
+}
+
+/* Chart series order list: same flat rows as Setup dataset list (keep color dots) */
+#appShellV2 .dataset-order-list,
+#appShellV2 .viz-toolbar .dataset-order-list {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+#appShellV2 .dataset-order-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--v2-text);
+  font-size: 13px;
+  font-weight: 400;
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .dataset-order-item:hover {
+  background: var(--v2-bg-hover);
+}
+
+#appShellV2 .dataset-order-item .dataset-color {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 0;
+}
+
+#appShellV2 .dataset-order-item > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--v2-text);
+  font-weight: 400;
+}
+
+#appShellV2 .dataset-order-controls {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+#appShellV2 .dataset-order-controls button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--v2-radius-sm);
+  background: transparent;
+  color: var(--v2-muted);
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: none;
+}
+
+#appShellV2 .dataset-order-controls button:hover:not(:disabled) {
+  background: var(--v2-bg-hover);
+  color: var(--v2-ink);
+  border-color: transparent;
+}
+
+#appShellV2 .dataset-order-controls button:last-child:hover:not(:disabled) {
+  color: var(--v2-danger);
+}
+
+#appShellV2 .dataset-order-controls button:disabled {
+  border: 0;
+  background: transparent;
+  color: var(--v2-border);
+  opacity: 1;
+}
+
+/* Dataset pickers: label + switch (checkbox restyled) */
+
+#appShellV2 .stats-dataset-picker {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+#appShellV2 .stats-dataset-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 8px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--v2-text);
+  font-size: 13px;
+  font-weight: 400;
+  font-family: var(--v2-font);
+  cursor: pointer;
+  transition: background 100ms var(--v2-ease);
+}
+
+#appShellV2 .stats-dataset-option:hover {
+  background: var(--v2-bg-hover);
+}
+
+#appShellV2 .stats-dataset-option.is-selected,
+#appShellV2 .stats-dataset-option:has(input:checked) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--v2-ink);
+  font-weight: 500;
+  box-shadow: none;
+}
+
+#appShellV2 .stats-dataset-option span {
+  flex: 1;
+  min-width: 0;
+  order: 1;
+}
+
+#appShellV2 .stats-dataset-option input {
+  appearance: none;
+  -webkit-appearance: none;
+  order: 2;
+  flex-shrink: 0;
+  width: var(--v2-switch-w);
+  height: var(--v2-switch-h);
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--v2-border);
+  background: var(--v2-switch-off);
+  accent-color: var(--v2-accent-muted);
+  cursor: pointer;
+  position: relative;
+  transition: background 120ms var(--v2-ease), border-color 120ms var(--v2-ease);
+}
+
+#appShellV2 .stats-dataset-option input::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: var(--v2-switch-knob-size);
+  height: var(--v2-switch-knob-size);
+  border-radius: 999px;
+  background: var(--v2-switch-knob);
+  transform: translateY(-50%);
+  transition: left 120ms var(--v2-ease);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+#appShellV2 .stats-dataset-option input:checked {
+  background: var(--v2-accent-muted);
+  border-color: var(--v2-accent-muted);
+}
+
+#appShellV2 .stats-dataset-option input:checked::before {
+  left: calc(100% - var(--v2-switch-knob-size) - 2px);
+}
+
+#appShellV2 .stats-dataset-option:has(input:focus-visible) {
+  outline: none;
+}
+
+#appShellV2 .stats-dataset-option input:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .stats-link,
+#appShellV2 .viz-link {
+  color: var(--v2-link);
+  font-size: 12px;
+  font-weight: 400;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--v2-font);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#appShellV2 .stats-link:hover,
+#appShellV2 .viz-link:hover {
+  color: var(--v2-ink);
+  text-decoration: underline;
+}
+
+/* ----- Multi-select toggles → labeled switch rows ----- */
+
+#appShellV2 .toggle-group,
+#appShellV2 .toggle-group.compact,
+#appShellV2 .stats-metric-chips {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  align-items: stretch;
+}
+
+#appShellV2 .stats-metric-group {
+  margin-top: 0;
+}
+
+#appShellV2 .stats-metric-group:first-child {
+  margin-top: 0;
+}
+
+#appShellV2 .toggle-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--v2-text);
+  font-family: var(--v2-font);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 100ms var(--v2-ease), color 100ms var(--v2-ease);
+}
+
+#appShellV2 .toggle-button:hover {
+  border-color: transparent;
+  background: var(--v2-bg-hover);
+  color: var(--v2-ink);
+}
+
+#appShellV2 .toggle-button.active {
+  border-color: transparent;
+  background: transparent;
+  color: var(--v2-ink);
+  font-weight: 500;
+  box-shadow: none;
+}
+
+#appShellV2 .toggle-button::after {
+  content: '';
+  flex-shrink: 0;
+  width: var(--v2-switch-w);
+  height: var(--v2-switch-h);
+  border-radius: 999px;
+  border: 1px solid var(--v2-border);
+  background: var(--v2-switch-off);
+  box-shadow: inset 0 0 0 0 transparent;
+  background-image: radial-gradient(
+    circle closest-side,
+    var(--v2-switch-knob) 96%,
+    transparent 100%
+  );
+  background-size: var(--v2-switch-knob-size) var(--v2-switch-knob-size);
+  background-repeat: no-repeat;
+  background-position: 3px 50%;
+  transition: background-color 120ms var(--v2-ease), border-color 120ms var(--v2-ease), background-position 120ms var(--v2-ease);
+}
+
+#appShellV2 .toggle-button.active::after {
+  background-color: var(--v2-accent-muted);
+  border-color: var(--v2-accent-muted);
+  background-image: radial-gradient(
+    circle closest-side,
+    var(--v2-switch-knob) 96%,
+    transparent 100%
+  );
+  background-position: calc(100% - 3px) 50%;
+}
+
+#appShellV2 .toggle-button:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .stats-avg-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+}
+
+#appShellV2 .stats-avg-toggle .stats-avg-main {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#appShellV2 .stats-avg-toggle .stats-avg-sub {
+  grid-column: 1;
+  grid-row: 2;
+  color: var(--v2-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+#appShellV2 .stats-avg-toggle::after {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: center;
+}
+
+/* Binary checkbox → switch (histogram density, etc.) */
+
+#appShellV2 .checkbox-label,
+#appShellV2 .viz-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 2px;
+  color: var(--v2-text);
+  font-size: 13px;
+  font-family: var(--v2-font);
+  cursor: pointer;
+}
+
+#appShellV2 .checkbox-label input[type="checkbox"],
+#appShellV2 .viz-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  width: var(--v2-switch-w);
+  height: var(--v2-switch-h);
+  margin: 0 0 0 auto;
+  order: 2;
+  border-radius: 999px;
+  border: 1px solid var(--v2-border);
+  background: var(--v2-switch-off);
+  position: relative;
+  cursor: pointer;
+  transition: background 120ms var(--v2-ease), border-color 120ms var(--v2-ease);
+}
+
+#appShellV2 .checkbox-label input[type="checkbox"]::before,
+#appShellV2 .viz-check input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: var(--v2-switch-knob-size);
+  height: var(--v2-switch-knob-size);
+  border-radius: 999px;
+  background: var(--v2-switch-knob);
+  transform: translateY(-50%);
+  transition: left 120ms var(--v2-ease);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+#appShellV2 .checkbox-label input[type="checkbox"]:checked,
+#appShellV2 .viz-check input[type="checkbox"]:checked {
+  background: var(--v2-accent-muted);
+  border-color: var(--v2-accent-muted);
+}
+
+#appShellV2 .checkbox-label input[type="checkbox"]:checked::before,
+#appShellV2 .viz-check input[type="checkbox"]:checked::before {
+  left: calc(100% - var(--v2-switch-knob-size) - 2px);
+}
+
+#appShellV2 .checkbox-label input[type="checkbox"]:focus-visible,
+#appShellV2 .viz-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+/* Contextual panels: soften show/hide - keep overflow visible when open so popovers aren't clipped */
+#appShellV2 #vizBarStatsPanel,
+#appShellV2 .viz-color-row,
+#appShellV2 #histogramDensityWrap {
+  overflow: visible;
+  opacity: 1;
+  max-height: 800px;
+  transform: translateY(0);
+  transition:
+    opacity 140ms var(--v2-ease),
+    max-height 160ms var(--v2-ease),
+    transform 140ms var(--v2-ease),
+    margin 140ms var(--v2-ease),
+    padding 140ms var(--v2-ease);
+}
+
+#appShellV2 #vizBarStatsPanel.hidden,
+#appShellV2 .viz-color-row.hidden,
+#appShellV2 #histogramDensityWrap.hidden {
+  display: block !important;
+  overflow: hidden;
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border: 0 !important;
+  transform: translateY(-2px);
+  pointer-events: none;
+  visibility: hidden;
+}
+
+#appShellV2 .color-picker-container {
+  position: relative;
+  overflow: visible;
+  z-index: 5;
+}
+
+/* ----- Primary / secondary / destructive buttons ----- */
+
+#appShellV2 .viz-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#appShellV2 .accent-button,
+#appShellV2 .stats-calc-btn,
+#appShellV2 .reliability-update-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--v2-radius);
+  background: var(--v2-accent);
+  color: var(--v2-accent-ink);
+  font-family: var(--v2-font);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+  min-height: 36px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+#appShellV2 .accent-button:hover,
+#appShellV2 .stats-calc-btn:hover,
+#appShellV2 .reliability-update-btn:hover {
+  background: var(--v2-accent-hover);
+  color: var(--v2-accent-ink);
+}
+
+#appShellV2 .accent-button:focus-visible,
+#appShellV2 .stats-calc-btn:focus-visible,
+#appShellV2 .reliability-update-btn:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .secondary-button {
+  border: 1px solid var(--v2-border);
+  background: var(--v2-field);
+  color: var(--v2-ink);
+  box-shadow: none;
+  min-height: 36px;
+  border-radius: var(--v2-radius);
+  font-family: var(--v2-font);
+  font-weight: 500;
+  width: 100%;
+}
+
+#appShellV2 .secondary-button:hover {
+  border-color: var(--v2-border);
+  background: var(--v2-bg-hover);
+  color: var(--v2-ink);
+}
+
+#appShellV2 .secondary-button.mini {
+  width: auto;
+  min-height: 28px;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+#appShellV2 #clearAllDatasets:not(:disabled),
+#appShellV2 #clearChartBtn:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  border: 0;
+  border-radius: var(--v2-radius);
+  background: var(--v2-danger);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  min-height: 36px;
+  padding: 8px 14px;
+  text-decoration: none;
+}
+
+#appShellV2 #clearAllDatasets:not(:disabled):hover,
+#appShellV2 #clearChartBtn:not(:disabled):hover {
+  background: var(--v2-danger-hover);
+  color: #fff;
+  border-color: transparent;
+  text-decoration: none;
+}
+
+#appShellV2 #clearAllDatasets:disabled {
+  color: var(--v2-muted);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+#appShellV2 #clearChartBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ----- Results chrome ----- */
+
+#appShellV2 .workbench-head {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--v2-border);
+}
+
+#appShellV2 .viz-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 0 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--v2-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+#appShellV2 .viz-toolbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#appShellV2 #exportChartPngBtn,
+#appShellV2 #exportReliabilityPngBtn,
+#appShellV2 #copyStatsMarkdownBtn,
+#appShellV2 #downloadStatsJsonBtn,
+#appShellV2 #exportStatsPngBtn {
+  border: 1px solid var(--v2-border);
+  background: var(--v2-field);
+  color: var(--v2-ink);
+  font-weight: 500;
+  border-radius: var(--v2-radius-sm);
+  width: auto;
+}
+
+#appShellV2 #exportChartPngBtn:hover,
+#appShellV2 #exportReliabilityPngBtn:hover,
+#appShellV2 #copyStatsMarkdownBtn:hover,
+#appShellV2 #downloadStatsJsonBtn:hover,
+#appShellV2 #exportStatsPngBtn:hover {
+  background: var(--v2-bg-hover);
+}
+
+#appShellV2 .stats-export-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 0 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--v2-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+#appShellV2 .stats-export-banner > span {
+  color: var(--v2-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#appShellV2 .stats-export-buttons {
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+#appShellV2 .reliability-chart-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--v2-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+#appShellV2 .reliability-chart-header h2 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+/* Results: use full available width */
+#appShellV2 #vizResultsV2,
+#appShellV2 #statsResultsV2,
+#appShellV2 #reliabilityResultsV2,
+#appShellV2 .viz-page,
+#appShellV2 .stats-page,
+#appShellV2 .reliability-page,
+#appShellV2 .stats-tables-stack,
+#appShellV2 .stats-export-banner,
+#appShellV2 .viz-toolbar,
+#appShellV2 .workbench-head {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+#appShellV2 .chart-container,
+#appShellV2 .reliability-chart-container {
+  border: 1px solid var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+  background: #1f1f1f;
+  box-shadow: none;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+#appShellV2 .chart-container canvas,
+#appShellV2 .reliability-chart-container canvas {
+  max-width: 100%;
+  width: 100%;
+}
+
+#appShellV2 .stats-aggregate-wrap,
+#appShellV2 .table-wrap {
+  width: 100%;
+  max-width: none;
+  border-color: var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+  background: transparent;
+  overflow-x: auto;
+}
+
+#appShellV2 .stats-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+#appShellV2 .stats-table th,
+#appShellV2 .stats-table td {
+  border-color: var(--v2-border-subtle);
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .stats-table .dataset-name-cell {
+  max-width: none;
+}
+
+/* ----- Empty states ----- */
+
+#appShellV2 .empty-chart-message,
+#appShellV2 .empty-stats-message {
+  padding: 32px 16px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--v2-border-subtle);
+}
+
+#appShellV2 .empty-chart-message p,
+#appShellV2 .empty-stats-message p {
+  color: var(--v2-muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+  max-width: 40ch;
+  margin-inline: auto;
+  font-family: var(--v2-font);
+}
+
+#appShellV2 .viz-empty {
+  color: var(--v2-muted);
+  font-size: 13px;
+}
+
+#appShellV2 .viz-inline-warning {
+  border-color: var(--v2-border);
+  background: var(--v2-bg-hover);
+  color: var(--v2-ink);
+  border-radius: var(--v2-radius-sm);
+}
+
+#appShellV2 .color-swatch-btn {
+  border-color: var(--v2-border);
+  border-radius: var(--v2-radius-sm);
+}
+
+#appShellV2 .color-popover {
+  border-color: var(--v2-border);
+  background: var(--v2-field);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 0.4);
+  z-index: 40;
+}
+
+#appShellV2 .color-popover-swatch:hover,
+#appShellV2 .color-popover-swatch:focus-visible {
+  outline-color: var(--v2-accent-muted);
+}
+
+#appShellV2 .color-popover-swatch.is-current {
+  box-shadow: inset 0 0 0 2px var(--v2-ink);
+}
+
+/* ----- Focus landings + transitions ----- */
+
+#appShellV2 .v2-panel-landing:focus {
+  outline: none;
+}
+
+#appShellV2 .v2-panel-landing:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .v2-mode:not(.hidden) .v2-step-panel:not(.hidden) {
+  animation: v2-panel-in 140ms var(--v2-ease) both;
+}
+
+@keyframes v2-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 900px) {
+  #appShellV2 .v2-setup-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  #appShellV2 .v2-topbar {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  #appShellV2 .v2-mode-switch {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  #appShellV2 .v2-mode-btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  #appShellV2 .v2-topbar-actions {
+    width: 100%;
+  }
+
+  #appShellV2 .v2-step-nav {
+    padding: 8px 12px 0;
+    overflow-x: auto;
+  }
+
+  #appShellV2 .v2-page {
+    padding: 10px 12px 28px;
+  }
+
+  #appShellV2 .workbench-head h1 {
+    font-size: 18px;
+  }
+
+  #appShellV2 .v2-step {
+    flex: 1;
+  }
+
+  #appShellV2 .viz-panel {
+    min-width: 0;
+  }
+
+  #appShellV2 .stats-export-buttons,
+  #appShellV2 .viz-toolbar-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  #appShellV2 .stats-export-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  #appShellV2 .v2-topbar-brand .brand-name {
+    font-size: 14px;
+  }
+
+  #appShellV2 .dataset-list-name {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #appShellV2 #vizBarStatsPanel,
+  #appShellV2 .viz-color-row,
+  #appShellV2 #histogramDensityWrap,
+  #appShellV2 .v2-mode-btn,
+  #appShellV2 .v2-step,
+  #appShellV2 .toggle-button,
+  #appShellV2 .stats-dataset-option,
+  #appShellV2 .toggle-button::after,
+  #appShellV2 .stats-dataset-option input,
+  #appShellV2 .stats-dataset-option input::before,
+  #appShellV2 .checkbox-label input[type="checkbox"],
+  #appShellV2 .checkbox-label input[type="checkbox"]::before {
+    transition: none;
+  }
+
+  #appShellV2 .v2-mode:not(.hidden) .v2-step-panel:not(.hidden) {
+    animation: none;
+  }
+}

@@ -1664,7 +1664,7 @@ function updateDatasetOrder () {
  */
 function exportChartPng(chart, filenamePrefix = 'chart') {
   if (!chart || !chart.canvas) {
-    window.notify?.('Nothing to export yet — add data to the chart first.', 'warning');
+    window.notify?.('Nothing to export yet - add data to the chart first.', 'warning');
     return;
   }
 

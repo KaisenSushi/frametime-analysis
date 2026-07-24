@@ -4,10 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Frame Timing Analyzer</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=20260721n" />
+  <link rel="stylesheet" href="style.css?v=20260724n" />
+  <link rel="stylesheet" href="v2-shell.css?v=20260724o" />
+  <link rel="stylesheet" href="v2-theme.css?v=20260724r" />
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
@@ -15,46 +14,47 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
 
-  <script src="dataManager.js?v=20260721n"></script>
-  <script src="statsManager.js?v=20260721n"></script>
-  <script src="chartManager.js?v=20260721n"></script>
+  <script src="dataManager.js?v=20260724o"></script>
+  <script src="statsManager.js?v=20260724q"></script>
+  <script src="chartManager.js?v=20260724q"></script>
   <script src="reliabilityManager.js?v=20260721n"></script>
-  <script src="main.js?v=20260721n"></script>
+  <script src="main.js?v=20260724q"></script>
+  <script src="v2-shell.js?v=20260724n"></script>
 </head>
 
 <body>
-  <a class="skip-link" href="#mainContent">Skip to content</a>
+  <a class="skip-link" href="#appShellV2">Skip to content</a>
   <div id="notification-container"></div>
 
-  <div class="app-shell">
-    <header class="app-topbar">
-      <div class="topbar-brand-group">
-        <a class="brand-block" href="#visualization" aria-label="Frame Timing Analyzer home">
-          <span class="brand-name">Frame Timing Analyzer</span>
-        </a>
-        <div class="topbar-workspace">
-          <p class="workspace-kicker">Analysis controls</p>
-          <p id="workspaceTitle" class="topbar-workspace-title">Visualization</p>
-        </div>
+  <div class="app-shell-v2" id="appShellV2">
+    <header class="v2-topbar">
+      <div class="v2-topbar-brand">
+        <span class="brand-name">Frame Timing Analyzer</span>
+        <p id="v2WorkspaceTitle" class="topbar-workspace-title">Visualization</p>
       </div>
-
-      <nav class="app-tabs" aria-label="Primary workspace" role="tablist">
-        <button id="visualizationTab" class="nav-item active" data-tab="visualization" type="button" role="tab" aria-controls="visualization" aria-selected="true">Visualization</button>
-        <button id="statisticsTab" class="nav-item" data-tab="statistics" type="button" role="tab" aria-controls="statistics" aria-selected="false" tabindex="-1">Statistics</button>
-        <button id="reliabilityTab" class="nav-item" data-tab="reliability" type="button" role="tab" aria-controls="reliability" aria-selected="false" tabindex="-1">Reliability</button>
+      <nav class="v2-mode-switch" role="tablist" aria-label="Primary workspace">
+        <button type="button" class="v2-mode-btn active" role="tab" data-mode="visualization" id="v2ModeVisualization" aria-selected="true" aria-controls="v2ModePanelVisualization" tabindex="0">Visualization</button>
+        <button type="button" class="v2-mode-btn" role="tab" data-mode="statistics" id="v2ModeStatistics" aria-selected="false" aria-controls="v2ModePanelStatistics" tabindex="-1">Statistics</button>
+        <button type="button" class="v2-mode-btn" role="tab" data-mode="reliability" id="v2ModeReliability" aria-selected="false" aria-controls="v2ModePanelReliability" tabindex="-1">Reliability</button>
       </nav>
-
-      <div class="topbar-actions">
+      <div class="v2-topbar-actions">
         <button id="toggleAdvancedBtn" class="secondary-button mini advanced-metrics-toggle" type="button" aria-pressed="false">Advanced metrics OFF</button>
-        <a href="https://github.com/BoringBoredom/Frame-Time-Analysis/raw/main/presentmon/presentmon.zip" target="_blank" rel="noopener" class="topbar-link" aria-label="Download PresentMon (opens in a new tab)">PresentMon</a>
-        <a href="https://discord.gg/kaisenn" target="_blank" rel="noopener" class="topbar-link" aria-label="Open Discord community (opens in a new tab)">Discord</a>
+        <a class="v2-topbar-link" href="https://github.com/BoringBoredom/Frame-Time-Analysis/raw/main/presentmon/presentmon.zip" target="_blank" rel="noopener" aria-label="Download PresentMon (opens in a new tab)">PresentMon</a>
+        <a class="v2-topbar-link" href="https://discord.gg/kaisenn" target="_blank" rel="noopener" aria-label="Open Discord community (opens in a new tab)">Discord</a>
       </div>
     </header>
 
-    <div class="app-layout">
-      <aside class="app-sidebar" aria-label="Analysis controls">
-        <div class="sidebar-panels">
-          <div id="visualizationSidebar" class="sidebar-panel viz-sidebar">
+    <div class="v2-step-nav" role="tablist" aria-label="Workflow step">
+      <button type="button" class="v2-step active" role="tab" data-step="setup" id="v2StepSetup" aria-selected="true" tabindex="0">1 · Setup</button>
+      <button type="button" class="v2-step" role="tab" data-step="results" id="v2StepResults" aria-selected="false" tabindex="-1">2 · Results</button>
+    </div>
+
+    <main class="v2-page" id="mainContent" tabindex="-1">
+      <!-- Visualization -->
+      <section class="v2-mode" data-mode="visualization" id="v2ModePanelVisualization" role="tabpanel" aria-labelledby="v2ModeVisualization">
+        <div class="v2-step-panel" data-step="setup" id="vizSetupV2">
+          <h2 class="v2-panel-landing sr-only" data-v2-focus-landing tabindex="-1">Visualization setup</h2>
+          <div class="v2-setup-columns">
             <section class="viz-panel intake-panel" aria-labelledby="importHeading">
               <div class="viz-panel-head">
                 <h3 id="importHeading">Import captures</h3>
@@ -166,9 +166,55 @@
                 <button id="clearChartBtn" class="secondary-button" disabled type="button">Clear</button>
               </div>
             </section>
-          </div>
 
-          <div id="statisticsSidebar" class="sidebar-panel stats-sidebar hidden">
+            <aside class="v2-tips-column" aria-labelledby="vizTipsHeading">
+              <div class="viz-panel-head">
+                <h3 id="vizTipsHeading">Tips</h3>
+              </div>
+              <p class="v2-tips-text">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.</p>
+              <p class="v2-tips-text">Check one or more datasets. Select only one when assigning a custom color.</p>
+              <p class="v2-tips-text">Histogram can show bins as % of frames. Summary-bar defaults match the Statistics workspace.</p>
+            </aside>
+          </div>
+        </div>
+
+        <div class="v2-step-panel hidden" data-step="results" id="vizResultsV2">
+          <h2 class="v2-panel-landing sr-only" data-v2-focus-landing tabindex="-1">Visualization results</h2>
+          <button type="button" id="vizBackToSetup" class="v2-back-setup">‹ Back to setup</button>
+          <div class="workbench-head">
+            <div>
+              <p class="workspace-kicker">Live chart</p>
+              <h1>Frame timing view</h1>
+            </div>
+          </div>
+          <div class="viz-toolbar">
+            <ul id="datasetOrderList" class="dataset-order-list" aria-label="Chart series order"></ul>
+            <div class="viz-toolbar-controls">
+              <span id="chartStatusLine" class="chart-status-line" aria-live="polite"></span>
+              <button id="resetZoomBtn" class="secondary-button mini" type="button" disabled>Reset zoom</button>
+              <button id="exportChartPngBtn" class="secondary-button mini" type="button">Export PNG</button>
+              <div class="chart-height-control">
+                <label for="chartHeight">Height</label>
+                <input type="range" id="chartHeight" min="280" max="900" value="520" aria-valuetext="520 pixels" />
+                <span id="chartHeightValue">520px</span>
+              </div>
+            </div>
+          </div>
+          <p class="viz-chart-hint" id="vizChartHint">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.</p>
+          <div class="chart-container empty" id="chartContainer" aria-describedby="vizChartHint">
+            <canvas id="mainChart" role="img" aria-label="Frame timing chart. Select datasets, then add them to the chart."></canvas>
+            <div id="vizEmptyChartMessage" class="empty-chart-message">
+              <p>Select datasets, then add them to the chart.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Statistics -->
+      <section class="v2-mode hidden" data-mode="statistics" id="v2ModePanelStatistics" role="tabpanel" aria-labelledby="v2ModeStatistics" aria-hidden="true">
+        <div class="v2-step-panel" data-step="setup" id="statsSetupV2">
+          <h2 class="v2-panel-landing sr-only" data-v2-focus-landing tabindex="-1">Statistics setup</h2>
+          <div class="v2-setup-columns">
             <section class="viz-panel sidebar-panel--half" aria-labelledby="statsDatasetsHeading">
               <div class="viz-panel-head">
                 <h3 id="statsDatasetsHeading">Datasets</h3>
@@ -211,9 +257,71 @@
               </div>
               <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
             </section>
-          </div>
 
-          <div id="reliabilitySidebar" class="sidebar-panel reliability-sidebar hidden">
+            <aside class="v2-tips-column" aria-labelledby="statsTipsHeading">
+              <div class="viz-panel-head">
+                <h3 id="statsTipsHeading">Tips</h3>
+              </div>
+              <p class="v2-tips-text">Core picks the default metric set; All enables every available metric chip.</p>
+              <p class="v2-tips-text">Avg reports both harmonic and arithmetic means where timing metrics support them.</p>
+              <p class="v2-tips-text">Toggle only the stats you need, then Calculate - results open in the next step with export options.</p>
+            </aside>
+          </div>
+        </div>
+
+        <div class="v2-step-panel hidden" data-step="results" id="statsResultsV2">
+          <h2 class="v2-panel-landing sr-only" data-v2-focus-landing tabindex="-1">Statistics results</h2>
+          <button type="button" id="statsBackToSetup" class="v2-back-setup">‹ Back to setup</button>
+          <section id="statistics" class="tab-content stats-page empty-stats" role="region" aria-labelledby="statsResultsHeading" tabindex="0">
+            <div class="workbench-head">
+              <div>
+                <p class="workspace-kicker">Computed table</p>
+                <h1 id="statsResultsHeading">Statistics report</h1>
+              </div>
+            </div>
+            <div class="stats-results">
+              <p id="statsStatusLine" class="sr-only" aria-live="polite" aria-atomic="true"></p>
+              <div class="empty-stats-message">
+                <p>Select datasets and metrics, then click <strong>Calculate statistics</strong></p>
+              </div>
+              <div id="statsExportBanner" class="stats-export-banner hidden" aria-hidden="true">
+                <span>Export results</span>
+                <div class="stats-export-buttons">
+                  <button id="copyStatsMarkdownBtn" class="secondary-button mini" type="button">Copy as Markdown</button>
+                  <button id="downloadStatsJsonBtn" class="secondary-button mini" type="button">Download as JSON</button>
+                  <button id="exportStatsPngBtn" class="secondary-button mini" type="button">Export PNG</button>
+                </div>
+              </div>
+              <div class="stats-tables-stack">
+                <div id="statsAggregateWrap" class="stats-aggregate-wrap hidden">
+                  <div class="stats-aggregate-title">Smoothness metrics</div>
+                  <div class="table-wrap stats-aggregate-table-wrap">
+                    <table id="statsAggregateTable" class="stats-table stats-aggregate-table">
+                      <caption>Smoothness metrics by dataset</caption>
+                      <thead></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="statsTablesDivider" class="stats-tables-divider hidden" role="separator" aria-hidden="true"></div>
+                <div class="table-wrap" id="statsMainTableWrap">
+                  <table id="statsTable" class="stats-table">
+                    <caption>Statistics by metric and dataset</caption>
+                    <thead></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- Reliability -->
+      <section class="v2-mode hidden" data-mode="reliability" id="v2ModePanelReliability" role="tabpanel" aria-labelledby="v2ModeReliability" aria-hidden="true">
+        <div class="v2-step-panel" data-step="setup" id="reliabilitySetupV2">
+          <h2 class="v2-panel-landing sr-only" data-v2-focus-landing tabindex="-1">Reliability setup</h2>
+          <div class="v2-setup-columns">
             <section class="viz-panel sidebar-panel--half" aria-labelledby="reliabilityDatasetsHeading">
               <div class="viz-panel-head">
                 <h3 id="reliabilityDatasetsHeading">Datasets</h3>
@@ -236,124 +344,53 @@
               <div class="viz-panel-head"><h3 id="reliabilityCdfHeading">CDF overlay</h3></div>
               <button id="updateReliabilityBtn" class="accent-button reliability-update-btn" type="button">Update reliability</button>
             </section>
+
+            <aside class="v2-tips-column" aria-labelledby="reliabilityTipsHeading">
+              <div class="viz-panel-head">
+                <h3 id="reliabilityTipsHeading">Tips</h3>
+              </div>
+              <p class="v2-tips-text">The CDF overlay compares the cumulative distribution of the selected metric across runs.</p>
+              <p class="v2-tips-text">Diagnostics use this same metric. Datasets with no finite values for it are skipped and listed in Results.</p>
+              <p class="v2-tips-text">Select datasets, pick a metric, then Update reliability to build the overlay.</p>
+            </aside>
           </div>
         </div>
-      </aside>
 
-      <main id="mainContent" class="content-pane" tabindex="-1">
-        <section id="visualization" class="tab-content viz-page" role="tabpanel" aria-labelledby="visualizationTab" tabindex="0">
-          <div class="workbench-head">
-            <div>
-              <p class="workspace-kicker">Live chart</p>
-              <h1>Frame timing view</h1>
-            </div>
-          </div>
-
-          <div class="viz-toolbar">
-            <ul id="datasetOrderList" class="dataset-order-list" aria-label="Chart series order"></ul>
-            <div class="viz-toolbar-controls">
-              <span id="chartStatusLine" class="chart-status-line" aria-live="polite"></span>
-              <button id="resetZoomBtn" class="secondary-button mini" type="button" disabled>Reset zoom</button>
-              <button id="exportChartPngBtn" class="secondary-button mini" type="button">Export PNG</button>
-              <div class="chart-height-control">
-                <label for="chartHeight">Height</label>
-                <input type="range" id="chartHeight" min="280" max="900" value="520" aria-valuetext="520 pixels" />
-                <span id="chartHeightValue">520px</span>
+        <div class="v2-step-panel hidden" data-step="results" id="reliabilityResultsV2">
+          <h2 class="v2-panel-landing sr-only" data-v2-focus-landing tabindex="-1">Reliability results</h2>
+          <button type="button" id="reliabilityBackToSetup" class="v2-back-setup">‹ Back to setup</button>
+          <section id="reliability" class="tab-content reliability-page" role="region" aria-labelledby="reliabilityResultsHeading" tabindex="0">
+            <div class="workbench-head">
+              <div>
+                <p class="workspace-kicker">Run-to-run confidence</p>
+                <h1 id="reliabilityResultsHeading">Reliability diagnostics</h1>
               </div>
             </div>
-          </div>
-
-          <p class="viz-chart-hint" id="vizChartHint">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.</p>
-
-          <div class="chart-container" id="chartContainer" aria-describedby="vizChartHint">
-            <canvas id="mainChart" role="img" aria-label="Frame timing chart. Select datasets, then add them to the chart."></canvas>
-            <div id="vizEmptyChartMessage" class="empty-chart-message">
-                <p>Select datasets, then add them to the chart.</p>
-            </div>
-          </div>
-        </section>
-
-        <section id="statistics" class="tab-content stats-page hidden" role="tabpanel" aria-labelledby="statisticsTab" aria-hidden="true" tabindex="0">
-          <div class="workbench-head">
-            <div>
-              <p class="workspace-kicker">Computed table</p>
-              <h1>Statistics report</h1>
-            </div>
-          </div>
-
-          <div class="stats-results">
-            <p id="statsStatusLine" class="sr-only" aria-live="polite" aria-atomic="true"></p>
-            <div class="empty-stats-message">
-              <p>Select datasets and metrics, then click <strong>Calculate statistics</strong></p>
-            </div>
-
-            <div id="statsExportBanner" class="stats-export-banner hidden" aria-hidden="true">
-              <span>Export results</span>
-              <div class="stats-export-buttons">
-                <button id="copyStatsMarkdownBtn" class="secondary-button mini" type="button">Copy as Markdown</button>
-                <button id="downloadStatsJsonBtn" class="secondary-button mini" type="button">Download as JSON</button>
-                <button id="exportStatsPngBtn" class="secondary-button mini" type="button">Export PNG</button>
+            <div class="reliability-chart-panel">
+              <div class="reliability-chart-header">
+                <div>
+                  <h2>CDF overlay</h2>
+                  <p>Overlap means runs match. Spread means run-to-run variance.</p>
+                </div>
+                <button id="exportReliabilityPngBtn" class="secondary-button mini" type="button">Export PNG</button>
               </div>
-            </div>
-
-            <div class="stats-tables-stack">
-              <div id="statsAggregateWrap" class="stats-aggregate-wrap hidden">
-                <div class="stats-aggregate-title">Smoothness metrics</div>
-                <div class="table-wrap stats-aggregate-table-wrap">
-                  <table id="statsAggregateTable" class="stats-table stats-aggregate-table">
-                    <caption>Smoothness metrics by dataset</caption>
-                    <thead></thead>
-                    <tbody></tbody>
-                  </table>
+              <p id="reliabilitySkipNotice" class="viz-inline-warning hidden" role="status"></p>
+              <p class="viz-chart-hint" id="reliabilityChartHint">Select datasets to compare cumulative distributions.</p>
+              <div class="chart-container reliability-chart-container empty" id="reliabilityChartContainer" aria-describedby="reliabilityChartHint">
+                <canvas id="reliabilityChart" role="img" aria-label="Reliability cumulative distribution chart. Select datasets to compare runs."></canvas>
+                <div id="reliabilityEmptyChartMessage" class="empty-chart-message">
+                  <p>Select datasets, then update reliability.</p>
                 </div>
               </div>
-
-              <div id="statsTablesDivider" class="stats-tables-divider hidden" role="separator" aria-hidden="true"></div>
-
-              <div class="table-wrap" id="statsMainTableWrap">
-                <table id="statsTable" class="stats-table">
-                  <caption>Statistics by metric and dataset</caption>
-                  <thead></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
             </div>
-          </div>
-        </section>
-
-        <section id="reliability" class="tab-content reliability-page hidden" role="tabpanel" aria-labelledby="reliabilityTab" aria-hidden="true" tabindex="0">
-          <div class="workbench-head">
-            <div>
-              <p class="workspace-kicker">Run-to-run confidence</p>
-              <h1>Reliability diagnostics</h1>
+            <div class="reliability-diagnostics">
+              <h2 id="reliabilityDiagnosticsHeading">Dataset diagnostics</h2>
+              <div id="reliabilityDiagnosticsContent" class="stats-diagnostics-grid"></div>
             </div>
-          </div>
-
-          <div class="reliability-chart-panel">
-            <div class="reliability-chart-header">
-              <div>
-                <h2>CDF overlay</h2>
-                <p>Overlap means runs match. Spread means run-to-run variance.</p>
-              </div>
-              <button id="exportReliabilityPngBtn" class="secondary-button mini" type="button">Export PNG</button>
-            </div>
-            <p id="reliabilitySkipNotice" class="viz-inline-warning hidden" role="status"></p>
-            <p class="viz-chart-hint" id="reliabilityChartHint">Select datasets to compare cumulative distributions.</p>
-            <div class="chart-container reliability-chart-container empty" id="reliabilityChartContainer" aria-describedby="reliabilityChartHint">
-              <canvas id="reliabilityChart" role="img" aria-label="Reliability cumulative distribution chart. Select datasets to compare runs."></canvas>
-              <div id="reliabilityEmptyChartMessage" class="empty-chart-message">
-                <p>Select datasets, then update reliability.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="reliability-diagnostics">
-            <h2 id="reliabilityDiagnosticsHeading">Dataset diagnostics</h2>
-            <div id="reliabilityDiagnosticsContent" class="stats-diagnostics-grid"></div>
-          </div>
-        </section>
-      </main>
-    </div>
+          </section>
+        </div>
+      </section>
+    </main>
   </div>
 </body>
 </html>

@@ -1,5 +1,5 @@
 function setupTopbarHeightSync() {
-  const topbar = document.querySelector('.app-topbar');
+  const topbar = document.querySelector('.v2-topbar') || document.querySelector('.app-topbar');
   if (!topbar) return;
 
   const updateTopbarHeight = () => {
@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Advanced metrics toggle (shared across all tabs via sidebar footer)
+  // Advanced metrics toggle
   const advBtn = document.getElementById('toggleAdvancedBtn');
   if (advBtn) {
     advBtn.addEventListener('click', () => {
@@ -46,54 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Sidebar navigation
-  const navItems = Array.from(document.querySelectorAll('.nav-item'));
-  const tabContents = document.querySelectorAll('.tab-content');
-  const sidebarPanels = document.querySelectorAll('.sidebar-panel');
-  const activateWorkspaceTab = (item, focusPanel = false) => {
-    if (!item) return;
-    navItems.forEach(n => {
-      const active = n === item;
-      n.classList.toggle('active', active);
-      n.setAttribute('aria-selected', String(active));
-      n.tabIndex = active ? 0 : -1;
-    });
-    tabContents.forEach(tc => {
-      tc.classList.add('hidden');
-      tc.setAttribute('aria-hidden', 'true');
-    });
-    sidebarPanels.forEach(sp => sp.classList.add('hidden'));
-
-    const tab = item.dataset.tab;
-    const target = document.getElementById(tab);
-    const sidebar = document.getElementById(tab + 'Sidebar');
-    target?.classList.remove('hidden');
-    target?.setAttribute('aria-hidden', 'false');
-    sidebar?.classList.remove('hidden');
-    const title = document.getElementById('workspaceTitle');
-    if (title) title.textContent = item.textContent.trim();
-    if (tab === 'reliability') window.renderReliabilityPage?.();
-    if (focusPanel) target?.focus({ preventScroll: true });
-  };
-
-  navItems.forEach((item, index) => {
-    item.addEventListener('click', () => activateWorkspaceTab(item, true));
-    item.addEventListener('keydown', event => {
-      let nextIndex = null;
-      if (event.key === 'ArrowRight') nextIndex = (index + 1) % navItems.length;
-      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + navItems.length) % navItems.length;
-      if (event.key === 'Home') nextIndex = 0;
-      if (event.key === 'End') nextIndex = navItems.length - 1;
-      if (nextIndex === null) return;
-      event.preventDefault();
-      activateWorkspaceTab(navItems[nextIndex]);
-      navItems[nextIndex].focus();
-    });
-  });
-  document.querySelector('.brand-block')?.addEventListener('click', event => {
-    event.preventDefault();
-    activateWorkspaceTab(navItems.find(item => item.dataset.tab === 'visualization'), true);
-  });
+  // Classic sidebar tab nav removed - mode switching lives in v2-shell.js.
 
   // 3. File input handling
   const fileInput = document.getElementById('fileInput');
@@ -201,10 +154,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     syncColorPickerFromSelection();
     const reliabilityPanel = document.getElementById('reliability');
-    const reliabilityNav = document.querySelector('.nav-item[data-tab="reliability"]');
+    const reliabilityMode = document.querySelector('.v2-mode[data-mode="reliability"]:not(.hidden)');
     if (
-      (reliabilityPanel && !reliabilityPanel.classList.contains('hidden')) ||
-      reliabilityNav?.classList.contains('active')
+      reliabilityMode ||
+      (reliabilityPanel && !reliabilityPanel.closest('.v2-step-panel.hidden'))
     ) {
       window.renderReliabilityPage?.();
     }
