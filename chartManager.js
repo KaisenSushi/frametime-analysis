@@ -1083,10 +1083,12 @@ const ANALYSIS_BOARD_STORAGE_KEY = 'fta-analysis-board-config-v1';
 const ANALYSIS_BOARD_MAX_CARDS = 6;
 const ANALYSIS_BOARD_CARD_TYPES = Object.freeze({
   timeline: { label: 'Timeline', description: 'Sampled values over the capture.' },
+  scatter: { label: 'Frame-time scatter', description: 'Individual sampled frames make stutters and spike locations easy to see.' },
   percentile: { label: 'Percentile curve', description: 'Full distribution from the lowest to highest values.' },
   histogram: { label: 'Histogram', description: 'Share of valid samples in shared value ranges.' },
   boxplot: { label: 'Box plot', description: 'Median, spread, whiskers, and outliers.' },
-  summary: { label: 'Summary bars', description: 'Average and worst-tail means.' }
+  summary: { label: 'Summary bars', description: 'Average and low-FPS tail means.' },
+  advanced: { label: 'Advanced metrics', description: 'Median, P95, P99, maximum spike, and frames above the spike threshold.' }
 });
 
 const ANALYSIS_BOARD_FALLBACK_METRICS = [
@@ -1112,9 +1114,11 @@ const ANALYSIS_BOARD_PRESET_TITLES = Object.freeze({
 const ANALYSIS_BOARD_PRESETS = Object.freeze({
   performance: [
     { id: 'performance-timeline', type: 'timeline', metric: 'FrameTime' },
+    { id: 'performance-scatter', type: 'scatter', metric: 'FrameTime' },
+    { id: 'performance-histogram', type: 'histogram', metric: 'FrameTime' },
     { id: 'performance-percentile', type: 'percentile', metric: 'RenderedFPS' },
-    { id: 'performance-box', type: 'boxplot', metric: 'RenderedFPS' },
-    { id: 'performance-summary', type: 'summary', metric: 'RenderedFPS' }
+    { id: 'performance-summary', type: 'summary', metric: 'RenderedFPS' },
+    { id: 'performance-advanced', type: 'advanced', metric: 'FrameTime', thresholdMs: 16.67 }
   ],
   consistency: [
     { id: 'consistency-timeline', type: 'timeline', metric: 'FrameTime' },
@@ -1157,16 +1161,22 @@ function normalizeBoardCards(cards) {
     let id = String(card?.id || `card-${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '-');
     if (!id || seen.has(id)) id = createBoardCardId();
     seen.add(id);
-    normalized.push({ id, type, metric });
+    const thresholdMs = Number.isFinite(Number(card?.thresholdMs)) && Number(card.thresholdMs) > 0
+      ? Math.min(1000, Number(card.thresholdMs))
+      : 16.67;
+    normalized.push({ id, type, metric, thresholdMs });
   });
   return normalized.length ? normalized : cloneBoardCards(ANALYSIS_BOARD_PRESETS.performance);
 }
 
 function cardsMatchPreset(cards, presetCards) {
   if (!Array.isArray(cards) || cards.length !== presetCards.length) return false;
-  return cards.every((card, index) =>
-    card.type === presetCards[index].type && card.metric === presetCards[index].metric
-  );
+  return cards.every((card, index) => {
+    const preset = presetCards[index];
+    const sameThreshold = card.type !== 'advanced'
+      || Math.abs(Number(card.thresholdMs || 16.67) - Number(preset.thresholdMs || 16.67)) < 0.001;
+    return card.type === preset.type && card.metric === preset.metric && sameThreshold;
+  });
 }
 
 function detectAnalysisBoardPreset(cards = analysisBoardConfig?.cards) {
@@ -1193,7 +1203,7 @@ function saveAnalysisBoardConfig() {
   try {
     localStorage.setItem(ANALYSIS_BOARD_STORAGE_KEY, JSON.stringify({
       version: 1,
-      cards: analysisBoardConfig.cards.map(({ id, type, metric }) => ({ id, type, metric }))
+      cards: analysisBoardConfig.cards.map(({ id, type, metric, thresholdMs }) => ({ id, type, metric, thresholdMs }))
     }));
   } catch (error) {
     console.warn('Could not save analysis-board configuration:', error);
@@ -1363,10 +1373,12 @@ function getBoardCardText(card) {
   const type = ANALYSIS_BOARD_CARD_TYPES[card.type] || ANALYSIS_BOARD_CARD_TYPES.timeline;
   const titles = {
     timeline: `${metricLabel} timeline`,
+    scatter: `${metricLabel} scatter`,
     percentile: `${metricLabel} percentiles`,
     histogram: `${metricLabel} histogram`,
     boxplot: `${metricLabel} distribution`,
-    summary: `${metricLabel} summary`
+    summary: `${metricLabel} summary`,
+    advanced: `${metricLabel} advanced metrics`
   };
   return { title: titles[card.type] || metricLabel, description: type.description, metricLabel };
 }
@@ -1413,6 +1425,7 @@ function renderAnalysisBoardCardShells() {
 
     const controls = document.createElement('div');
     controls.className = 'analysis-board-card-controls';
+    controls.classList.toggle('has-spike-threshold', card.type === 'advanced');
     controls.setAttribute('data-export-exclude', 'true');
     const typeSelect = makeBoardSelect(
       'analysis-board-card-select analysis-board-card-type',
@@ -1440,9 +1453,21 @@ function renderAnalysisBoardCardShells() {
       button.disabled = disabled;
       return button;
     };
+    controls.append(typeSelect, metricSelect);
+    if (card.type === 'advanced') {
+      const threshold = document.createElement('input');
+      threshold.type = 'number';
+      threshold.className = 'analysis-board-card-select analysis-board-spike-threshold';
+      threshold.dataset.cardId = card.id;
+      threshold.min = '0.01';
+      threshold.max = '1000';
+      threshold.step = '0.01';
+      threshold.value = String(card.thresholdMs || 16.67);
+      threshold.setAttribute('aria-label', `Spike threshold in milliseconds for card ${index + 1}`);
+      threshold.title = 'Spike threshold (ms)';
+      controls.appendChild(threshold);
+    }
     controls.append(
-      typeSelect,
-      metricSelect,
       makeAction('up', '↑', `Move card ${index + 1} up`, index === 0),
       makeAction('down', '↓', `Move card ${index + 1} down`, index === cards.length - 1),
       makeAction('remove', '×', `Remove card ${index + 1}`, cards.length <= 1)
@@ -1544,7 +1569,54 @@ function buildBoardCardChart(card, elements, entries) {
   const metricLabel = getBoardCardText(card).metricLabel;
   const yLabel = getYAxisLabel(card.metric);
 
-  if (card.type === 'timeline') {
+  if (card.type === 'advanced') {
+    const percentile = (sorted, percent) => {
+      if (!sorted.length) return NaN;
+      const position = (sorted.length - 1) * percent / 100;
+      const lower = Math.floor(position);
+      const upper = Math.ceil(position);
+      return lower === upper
+        ? sorted[lower]
+        : sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+    };
+    const threshold = Number(card.thresholdMs) > 0 ? Number(card.thresholdMs) : 16.67;
+    elements.canvas.classList.add('hidden');
+    const panel = document.createElement('div');
+    panel.className = 'analysis-board-advanced';
+    panel.setAttribute('role', 'table');
+    panel.setAttribute('aria-label', `${metricLabel} advanced metrics with ${threshold.toFixed(2)} millisecond spike threshold`);
+    entries.forEach(entry => {
+      const sorted = Array.from(entry.values).sort((a, b) => a - b);
+      const metrics = [
+        ['Median', percentile(sorted, 50)],
+        ['P95', percentile(sorted, 95)],
+        ['P99', percentile(sorted, 99)],
+        ['Maximum spike', sorted[sorted.length - 1]],
+        [`Spikes > ${threshold.toFixed(2)} ms`, sorted.filter(value => value > threshold).length]
+      ];
+      const section = document.createElement('section');
+      section.className = 'analysis-board-advanced-dataset';
+      const heading = document.createElement('h4');
+      heading.textContent = entry.label;
+      heading.style.setProperty('--dataset-color', entry.color);
+      const list = document.createElement('dl');
+      metrics.forEach(([label, value], index) => {
+        const term = document.createElement('dt');
+        term.textContent = label;
+        const detail = document.createElement('dd');
+        detail.textContent = index === 4
+          ? Number(value).toLocaleString()
+          : (window.formatStatValue?.(card.metric, index === 0 ? 'median' : 'p1', value) ?? Number(value).toFixed(2));
+        list.append(term, detail);
+      });
+      section.append(heading, list);
+      panel.appendChild(section);
+    });
+    elements.canvas.parentElement.appendChild(panel);
+    return true;
+  }
+
+  if (card.type === 'timeline' || card.type === 'scatter') {
     const useElapsedTime = [
       'FrameTime', 'DisplayedFrameTime', 'MsBetweenPresents', 'MsBetweenDisplayChange'
     ].includes(card.metric);
@@ -1570,9 +1642,10 @@ function buildBoardCardChart(card, elements, entries) {
         data: points,
         borderColor: entry.color,
         backgroundColor: entry.color,
-        pointRadius: 0,
+        pointRadius: card.type === 'scatter' ? 1.8 : 0,
+        pointHoverRadius: card.type === 'scatter' ? 2.5 : 0,
         spanGaps: true,
-        showLine: true
+        showLine: card.type !== 'scatter'
       };
     });
     createAnalysisBoardChart(elements.canvas, {
@@ -1672,7 +1745,7 @@ function buildBoardCardChart(card, elements, entries) {
   }
 
   if (card.type === 'summary') {
-    const labels = ['Average', 'Worst 1% mean', 'Worst 0.1% mean'];
+    const labels = ['Average', '1% Low', '0.1% Low'];
     createAnalysisBoardChart(elements.canvas, {
       type: 'bar',
       data: {
@@ -1928,14 +2001,26 @@ function setupAnalysisBoardCustomization() {
 
   grid?.addEventListener('change', event => {
     const target = event.target;
-    if (!(target instanceof HTMLSelectElement)) return;
+    if (!(target instanceof HTMLSelectElement) && !(target instanceof HTMLInputElement)) return;
     const cardId = target.dataset.cardId;
     if (!cardId) return;
     if (target.classList.contains('analysis-board-card-type')) {
       updateAnalysisBoardCard(cardId, { type: target.value });
     } else if (target.classList.contains('analysis-board-card-metric')) {
       updateAnalysisBoardCard(cardId, { metric: target.value });
+    } else if (target.classList.contains('analysis-board-spike-threshold')) {
+      const thresholdMs = Math.min(1000, Math.max(0.01, Number(target.value) || 16.67));
+      updateAnalysisBoardCard(cardId, { thresholdMs });
     }
+  });
+
+  grid?.addEventListener('input', event => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || !target.classList.contains('analysis-board-spike-threshold')) return;
+    const cardId = target.dataset.cardId;
+    const numeric = Number(target.value);
+    if (!cardId || !Number.isFinite(numeric) || numeric <= 0) return;
+    updateAnalysisBoardCard(cardId, { thresholdMs: Math.min(1000, Math.max(0.01, numeric)) });
   });
 
   grid?.addEventListener('click', event => {

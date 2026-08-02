@@ -4402,3 +4402,52 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
     max-width: none;
   }
 }
+
+/* Analysis board phase 4: scatter and advanced frame-time metrics */
+#appShellV2 .analysis-board-spike-threshold { width: 7.5rem; }
+
+#appShellV2 .analysis-board-card-controls.has-spike-threshold {
+  grid-template-columns: minmax(90px, 0.8fr) minmax(120px, 1.2fr) minmax(72px, 0.65fr) repeat(3, 30px);
+  width: min(100%, 620px);
+  max-width: 70%;
+}
+
+#appShellV2 .analysis-board-advanced {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem;
+  padding: 0.25rem;
+  overflow: auto;
+}
+
+#appShellV2 .analysis-board-advanced-dataset {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--v2-border, var(--border));
+  border-radius: 10px;
+  background: var(--v2-surface-soft, var(--surface));
+}
+
+#appShellV2 .analysis-board-advanced-dataset h4 {
+  margin: 0 0 0.7rem;
+  padding-left: 0.65rem;
+  border-left: 4px solid var(--dataset-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#appShellV2 .analysis-board-advanced-dataset dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem 0.8rem;
+  margin: 0;
+}
+
+#appShellV2 .analysis-board-advanced-dataset dt,
+#appShellV2 .analysis-board-advanced-dataset dd { margin: 0; }
+
+#appShellV2 .analysis-board-advanced-dataset dd {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}

@@ -2145,20 +2145,20 @@ function getStatDisplayName(stat, metrics = []) {
   const allNonFps = selected.length > 0 && selected.every(metric => !isFpsLikeMetric(metric));
   const percentileLabels = allFps
     ? {
-        p1: '1st percentile (worst 1%)',
-        p01: '0.1 percentile (worst 0.1%)',
-        p001: '0.01 percentile (worst 0.01%)'
+        p1: '1%ile',
+        p01: '0.1%ile',
+        p001: '0.01%ile'
       }
     : allNonFps
       ? {
-          p1: '99th percentile (worst 1%)',
-          p01: '99.9th percentile (worst 0.1%)',
-          p001: '99.99th percentile (worst 0.01%)'
+          p1: '1%ile',
+          p01: '0.1%ile',
+          p001: '0.01%ile'
         }
       : {
-          p1: 'Worst 1% cutoff',
-          p01: 'Worst 0.1% cutoff',
-          p001: 'Worst 0.01% cutoff'
+          p1: '1%ile',
+          p01: '0.1%ile',
+          p001: '0.01%ile'
         };
 
   const displayNames = {
@@ -2169,9 +2169,9 @@ function getStatDisplayName(stat, metrics = []) {
     mode: 'Mode',
     stdev: getStdevDisplayLabel(metrics),
     ...percentileLabels,
-    low1: 'Worst 1% mean',
-    low01: 'Worst 0.1% mean',
-    low001: 'Worst 0.01% mean',
+    low1: '1% Low',
+    low01: '0.1% Low',
+    low001: '0.01% Low',
     high1: 'Best 1% mean',
     high01: 'Best 0.1% mean'
   };

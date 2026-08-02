@@ -18,7 +18,7 @@
       window.__ftaInitialTheme = theme;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20260802board3" />
+  <link rel="stylesheet" href="style.css?v=20260803board4" />
   <link rel="stylesheet" href="v2-shell.css?v=20260802board3" />
   <link rel="stylesheet" href="v2-theme.css?v=20260802board3" />
   <script>
@@ -33,8 +33,8 @@
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js" onerror="window.__ftaDependencyFailed('jStat')"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js" onerror="window.__ftaDependencyFailed('PNG export')"></script>
   <script defer src="dataManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Data manager')"></script>
-  <script defer src="statsManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
-  <script defer src="chartManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
+  <script defer src="statsManager.js?v=20260803board4" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
+  <script defer src="chartManager.js?v=20260803board4" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
   <script defer src="reliabilityManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
   <script defer src="main.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Application controller')"></script>
   <script defer src="v2-shell.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
@@ -187,12 +187,12 @@
                   <button type="button" class="toggle-button active" data-stat="max" aria-pressed="true">Max</button>
                   <button type="button" class="toggle-button active" data-stat="avg" aria-pressed="true">Avg</button>
                   <button type="button" class="toggle-button active" data-stat="min" aria-pressed="true">Min</button>
-                  <button type="button" class="toggle-button" data-stat="p1" aria-pressed="false">Worst 1% cutoff</button>
-                  <button type="button" class="toggle-button" data-stat="p01" aria-pressed="false">Worst 0.1% cutoff</button>
-                  <button type="button" class="toggle-button" data-stat="p001" aria-pressed="false">Worst 0.01% cutoff</button>
-                  <button type="button" class="toggle-button active" data-stat="low1" aria-pressed="true">Worst 1% mean</button>
-                  <button type="button" class="toggle-button active" data-stat="low01" aria-pressed="true">Worst 0.1% mean</button>
-                  <button type="button" class="toggle-button" data-stat="low001" aria-pressed="false">Worst 0.01% mean</button>
+                  <button type="button" class="toggle-button" data-stat="p1" aria-pressed="false">1%ile</button>
+                  <button type="button" class="toggle-button" data-stat="p01" aria-pressed="false">0.1%ile</button>
+                  <button type="button" class="toggle-button" data-stat="p001" aria-pressed="false">0.01%ile</button>
+                  <button type="button" class="toggle-button active" data-stat="low1" aria-pressed="true">1% Low</button>
+                  <button type="button" class="toggle-button active" data-stat="low01" aria-pressed="true">0.1% Low</button>
+                  <button type="button" class="toggle-button" data-stat="low001" aria-pressed="false">0.01% Low</button>
                   <button type="button" class="toggle-button active" data-stat="stdev" aria-pressed="true">STDEV</button>
                 </div>
                 <p class="viz-bar-hint">Defaults match the Statistics workspace.</p>
@@ -298,7 +298,7 @@
               <table class="analysis-board-table">
                 <caption id="analysisBoardStatsCaption">Board summary statistics</caption>
                 <thead>
-                  <tr><th scope="col">Dataset</th><th scope="col">Average</th><th scope="col">Worst 1%</th><th scope="col">Worst 0.1%</th><th scope="col">STDEV</th><th scope="col">Samples</th></tr>
+                  <tr><th scope="col">Dataset</th><th scope="col">Average</th><th scope="col">1% Low</th><th scope="col">0.1% Low</th><th scope="col">STDEV</th><th scope="col">Samples</th></tr>
                 </thead>
                 <tbody id="analysisBoardStatsBody"></tbody>
               </table>
@@ -341,12 +341,12 @@
                 <button type="button" class="toggle-button active" data-stat="min" aria-pressed="true">Min</button>
                 <button type="button" class="toggle-button active" data-stat="median" aria-label="Median" aria-pressed="true">Median</button>
                 <button type="button" class="toggle-button active" data-stat="mode" aria-label="Mode, density peak" aria-pressed="true">Mode</button>
-                <button type="button" class="toggle-button" data-stat="p1" aria-pressed="false">Worst 1% cutoff</button>
-                <button type="button" class="toggle-button" data-stat="p01" aria-pressed="false">Worst 0.1% cutoff</button>
-                <button type="button" class="toggle-button" data-stat="p001" aria-pressed="false">Worst 0.01% cutoff</button>
-                <button type="button" class="toggle-button active" data-stat="low1" aria-pressed="true">Worst 1% mean</button>
-                <button type="button" class="toggle-button active" data-stat="low01" aria-pressed="true">Worst 0.1% mean</button>
-                <button type="button" class="toggle-button" data-stat="low001" aria-pressed="false">Worst 0.01% mean</button>
+                <button type="button" class="toggle-button" data-stat="p1" aria-pressed="false">1%ile</button>
+                <button type="button" class="toggle-button" data-stat="p01" aria-pressed="false">0.1%ile</button>
+                <button type="button" class="toggle-button" data-stat="p001" aria-pressed="false">0.01%ile</button>
+                <button type="button" class="toggle-button active" data-stat="low1" aria-pressed="true">1% Low</button>
+                <button type="button" class="toggle-button active" data-stat="low01" aria-pressed="true">0.1% Low</button>
+                <button type="button" class="toggle-button" data-stat="low001" aria-pressed="false">0.01% Low</button>
                 <button type="button" class="toggle-button" data-stat="high1" aria-pressed="false">Best 1% mean</button>
                 <button type="button" class="toggle-button" data-stat="high01" aria-pressed="false">Best 0.1% mean</button>
                 <button type="button" class="toggle-button active" data-stat="stdev" aria-pressed="true">STDEV</button>
