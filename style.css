@@ -2601,7 +2601,7 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   opacity: 1;
 }
 
-/* Dataset pickers: label + switch (checkbox restyled) */
+/* Dataset pickers: the whole row is the selection target. */
 
 #appShellV2 .stats-dataset-picker {
   display: flex;
@@ -2616,6 +2616,7 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
 }
 
 #appShellV2 .stats-dataset-option {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -2623,7 +2624,7 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   width: 100%;
   max-width: 100%;
   min-height: 38px;
-  padding: 8px 6px;
+  padding: 8px 8px 8px 6px;
   border: 0;
   border-bottom: 1px solid var(--v2-border-subtle);
   border-radius: 0;
@@ -2633,6 +2634,7 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   font-weight: 400;
   font-family: var(--v2-font);
   cursor: pointer;
+  user-select: none;
   transition: background 100ms var(--v2-ease), box-shadow 100ms var(--v2-ease), color 100ms var(--v2-ease);
 }
 
@@ -2658,7 +2660,6 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
 }
 
 #appShellV2 .dataset-option-color {
-  order: 1;
   flex: 0 0 auto;
   width: 10px;
   height: 10px;
@@ -2667,65 +2668,33 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
 }
 
 #appShellV2 .dataset-option-name {
-  order: 1;
   flex: 1 1 auto;
   min-width: 0;
-  margin-right: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Keep a native checkbox for keyboard and assistive technology, but make the
+   row—not a toggle switch—the visible control. */
 #appShellV2 .stats-dataset-option input {
-  appearance: none;
-  -webkit-appearance: none;
-  order: 2;
-  flex-shrink: 0;
-  width: var(--v2-switch-w);
-  height: var(--v2-switch-h);
-  margin: 0;
-  border-radius: 999px;
-  border: 1px solid var(--v2-border);
-  background: var(--v2-switch-off);
-  accent-color: var(--v2-accent-muted);
-  cursor: pointer;
-  position: relative;
-  opacity: 1;
-  pointer-events: auto;
-  transition: background 120ms var(--v2-ease), border-color 120ms var(--v2-ease), box-shadow 120ms var(--v2-ease);
-}
-
-#appShellV2 .stats-dataset-option input::before {
-  content: '';
   position: absolute;
-  top: 50%;
-  left: 2px;
-  width: var(--v2-switch-knob-size);
-  height: var(--v2-switch-knob-size);
-  border-radius: 999px;
-  background: var(--v2-switch-knob);
-  transform: translateY(-50%);
-  transition: left 120ms var(--v2-ease);
-  box-shadow: var(--v2-control-shadow);
-}
-
-#appShellV2 .stats-dataset-option input:checked {
-  background: var(--v2-accent-muted);
-  border-color: var(--v2-accent-muted);
-  box-shadow: 0 0 0 1px var(--v2-selected-ring);
-}
-
-#appShellV2 .stats-dataset-option input:checked::before {
-  left: calc(100% - var(--v2-switch-knob-size) - 2px);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
 }
 
 #appShellV2 .stats-dataset-option:has(input:focus-visible) {
-  outline: none;
-}
-
-#appShellV2 .stats-dataset-option input:focus-visible {
   outline: 2px solid var(--v2-accent-muted);
   outline-offset: 2px;
+  z-index: 1;
 }
 
 #appShellV2 .dataset-selection-count {
@@ -3429,23 +3398,100 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   white-space: nowrap;
 }
 
-#appShellV2 .theme-select {
-  display: inline-block;
-  width: auto;
+#appShellV2 .theme-menu-wrap {
+  position: relative;
+  min-width: 116px;
+}
+
+#appShellV2 .theme-menu-button {
+  display: inline-flex;
+  width: 100%;
   min-width: 116px;
   height: 30px;
   min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 0;
-  padding: 4px 28px 4px 8px;
+  padding: 4px 9px;
   border: 1px solid var(--v2-border);
   border-radius: var(--v2-radius-sm);
-  background-color: var(--v2-field);
+  background: var(--v2-field);
   color: var(--v2-text);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   line-height: 20px;
-  vertical-align: middle;
   cursor: pointer;
+}
+
+#appShellV2 .theme-menu-chevron {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 120ms var(--v2-ease);
+}
+
+#appShellV2 .theme-menu-button[aria-expanded="true"] .theme-menu-chevron {
+  transform: translateY(2px) rotate(225deg);
+}
+
+#appShellV2 .theme-menu-button:hover {
+  border-color: var(--v2-border-strong);
+  color: var(--v2-ink);
+}
+
+#appShellV2 .theme-menu-button:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .theme-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 80;
+  width: 100%;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--v2-border-strong);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-panel-bg, var(--v2-bg));
+  box-shadow: var(--v2-panel-shadow, 0 12px 28px rgb(0 0 0 / 0.28));
+}
+
+#appShellV2 .theme-menu-option {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: calc(var(--v2-radius-sm) - 2px);
+  color: var(--v2-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+#appShellV2 .theme-menu-option:hover,
+#appShellV2 .theme-menu-option:focus-visible {
+  outline: none;
+  background: var(--v2-bg-hover);
+  color: var(--v2-ink);
+}
+
+#appShellV2 .theme-menu-option.is-selected,
+#appShellV2 .theme-menu-option[aria-selected="true"] {
+  background: var(--v2-accent-muted);
+  color: var(--v2-accent-ink);
+}
+
+#appShellV2 .theme-menu-option.is-selected:hover,
+#appShellV2 .theme-menu-option[aria-selected="true"]:focus-visible {
+  filter: brightness(1.05);
 }
 
 #appShellV2 .v2-topbar-actions > .advanced-metrics-toggle {
@@ -3457,16 +3503,6 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
-}
-
-#appShellV2 .theme-select:hover {
-  border-color: var(--v2-border-strong);
-  color: var(--v2-ink);
-}
-
-#appShellV2 .theme-select:focus-visible {
-  outline: 2px solid var(--v2-accent-muted);
-  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: no-preference) {

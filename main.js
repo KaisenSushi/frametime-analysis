@@ -1,18 +1,29 @@
-const APP_THEMES = Object.freeze([
-  'graphite',
-  'light',
-  'nord',
-  'gruvbox',
-  'catppuccin',
-  'purple'
-]);
+const APP_THEME_LABELS = Object.freeze({
+  graphite: 'Graphite',
+  light: 'Light',
+  nord: 'Nord',
+  gruvbox: 'Gruvbox',
+  catppuccin: 'Catppuccin',
+  purple: 'Purple'
+});
+
+const APP_THEMES = Object.freeze(Object.keys(APP_THEME_LABELS));
+
+function syncThemeMenu(theme) {
+  const value = document.getElementById('themeMenuValue');
+  if (value) value.textContent = APP_THEME_LABELS[theme] || APP_THEME_LABELS.graphite;
+
+  document.querySelectorAll('[data-theme-option]').forEach(option => {
+    const selected = option.dataset.themeOption === theme;
+    option.setAttribute('aria-selected', String(selected));
+    option.classList.toggle('is-selected', selected);
+  });
+}
 
 function applyAppTheme(theme, { persist = true } = {}) {
   const nextTheme = APP_THEMES.includes(theme) ? theme : 'graphite';
   document.documentElement.dataset.theme = nextTheme;
-
-  const select = document.getElementById('themeSelect');
-  if (select && select.value !== nextTheme) select.value = nextTheme;
+  syncThemeMenu(nextTheme);
 
   if (persist) {
     try { localStorage.setItem('fta-theme', nextTheme); }
@@ -30,14 +41,91 @@ function applyAppTheme(theme, { persist = true } = {}) {
 }
 
 function setupThemeSelector() {
-  const select = document.getElementById('themeSelect');
-  if (!select) return;
+  const button = document.getElementById('themeMenuButton');
+  const menu = document.getElementById('themeMenu');
+  if (!button || !menu) return;
+
+  const options = Array.from(menu.querySelectorAll('[data-theme-option]'));
   const initial = APP_THEMES.includes(document.documentElement.dataset.theme)
     ? document.documentElement.dataset.theme
     : (window.__ftaInitialTheme || 'graphite');
-  select.value = initial;
+
+  const selectedIndex = () => Math.max(0, options.findIndex(option =>
+    option.dataset.themeOption === document.documentElement.dataset.theme
+  ));
+
+  const focusOption = index => {
+    if (!options.length) return;
+    const nextIndex = (index + options.length) % options.length;
+    options[nextIndex].focus();
+  };
+
+  const openMenu = ({ focusSelected = false } = {}) => {
+    menu.classList.remove('hidden');
+    button.setAttribute('aria-expanded', 'true');
+    if (focusSelected) requestAnimationFrame(() => focusOption(selectedIndex()));
+  };
+
+  const closeMenu = ({ restoreFocus = false } = {}) => {
+    menu.classList.add('hidden');
+    button.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) button.focus({ preventScroll: true });
+  };
+
+  const chooseTheme = option => {
+    const theme = option?.dataset.themeOption;
+    if (!APP_THEMES.includes(theme)) return;
+    applyAppTheme(theme);
+    closeMenu({ restoreFocus: true });
+  };
+
   applyAppTheme(initial, { persist: false });
-  select.addEventListener('change', () => applyAppTheme(select.value));
+
+  button.addEventListener('click', () => {
+    const expanded = button.getAttribute('aria-expanded') === 'true';
+    if (expanded) closeMenu();
+    else openMenu();
+  });
+
+  button.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      openMenu({ focusSelected: true });
+    }
+  });
+
+  options.forEach((option, index) => {
+    option.addEventListener('click', () => chooseTheme(option));
+    option.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        chooseTheme(option);
+        return;
+      }
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        focusOption(index + 1);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusOption(index - 1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        focusOption(0);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        focusOption(options.length - 1);
+      } else if (event.key === 'Escape' || event.key === 'Tab') {
+        if (event.key === 'Escape') event.preventDefault();
+        closeMenu({ restoreFocus: event.key === 'Escape' });
+      }
+    });
+  });
+
+  document.addEventListener('pointerdown', event => {
+    if (!menu.classList.contains('hidden') && !event.target.closest('.theme-control')) {
+      closeMenu();
+    }
+  });
 }
 
 window.applyAppTheme = applyAppTheme;
@@ -348,6 +436,7 @@ function populateAllDatasetSelects() {
       input.type = 'checkbox';
       input.value = String(dataset.id ?? dataset.name ?? id);
       input.checked = autoSelectAll || currentValues.includes(input.value);
+      input.setAttribute('aria-label', `Select ${dataset.name}`);
 
       const colorDot = document.createElement('span');
       colorDot.className = 'dataset-option-color';
@@ -360,8 +449,10 @@ function populateAllDatasetSelects() {
       name.title = dataset.name;
 
       label.classList.toggle('is-selected', input.checked);
+      label.setAttribute('data-selected', String(input.checked));
       input.addEventListener('change', () => {
         label.classList.toggle('is-selected', input.checked);
+        label.setAttribute('data-selected', String(input.checked));
         updateDatasetPickerCount(picker);
         if (picker.id === 'reliabilityDatasetSelect') {
           if (typeof window.updateMetricDropdowns === 'function') {
@@ -427,7 +518,9 @@ function setDatasetPickerAll(pickerOrId, selected) {
   if (!picker) return;
   picker.querySelectorAll('input[type="checkbox"]').forEach(input => {
     input.checked = selected;
-    input.closest('.stats-dataset-option')?.classList.toggle('is-selected', selected);
+    const option = input.closest('.stats-dataset-option');
+    option?.classList.toggle('is-selected', selected);
+    option?.setAttribute('data-selected', String(selected));
   });
   updateDatasetPickerCount(picker);
 }
