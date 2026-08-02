@@ -1086,9 +1086,13 @@ function destroyAnalysisBoard() {
   const legend = document.getElementById('analysisBoardLegend');
   const body = document.getElementById('analysisBoardStatsBody');
   const status = document.getElementById('analysisBoardStatus');
+  const meta = document.getElementById('analysisBoardExportMeta');
+  const exportButton = document.getElementById('exportAnalysisBoardPngBtn');
   if (legend) legend.innerHTML = '';
   if (body) body.innerHTML = '';
   if (status) status.textContent = '';
+  if (meta) meta.textContent = 'Rendered frame-time and FPS overview';
+  if (exportButton) exportButton.disabled = true;
 }
 
 function syncVisualizationResultUi(mode = visualizationResultMode) {
@@ -1098,6 +1102,8 @@ function syncVisualizationResultUi(mode = visualizationResultMode) {
   const orderList = document.getElementById('datasetOrderList');
   const resetButton = document.getElementById('resetZoomBtn');
   const exportButton = document.getElementById('exportChartPngBtn');
+  const boardToolbar = document.getElementById('analysisBoardToolbar');
+  const boardExportButton = document.getElementById('exportAnalysisBoardPngBtn');
   const heightControl = document.querySelector('.chart-height-control');
   const hint = document.getElementById('vizChartHint');
 
@@ -1106,6 +1112,8 @@ function syncVisualizationResultUi(mode = visualizationResultMode) {
   orderList?.classList.toggle('hidden', boardMode);
   resetButton?.classList.toggle('hidden', boardMode);
   exportButton?.classList.toggle('hidden', boardMode);
+  boardToolbar?.classList.toggle('hidden', !boardMode);
+  if (boardExportButton) boardExportButton.disabled = !window.analysisBoardReady || !window.htmlToImage;
   heightControl?.classList.toggle('hidden', boardMode);
   if (hint) {
     hint.textContent = boardMode
@@ -1377,10 +1385,14 @@ function buildAnalysisBoard(indices, { silent = false } = {}) {
   });
 
   buildBoardStatsTable(entries);
+  const frames = entries.reduce((sum, entry) => sum + entry.fpsValues.length, 0);
   const status = document.getElementById('analysisBoardStatus');
+  const meta = document.getElementById('analysisBoardExportMeta');
   if (status) {
-    const frames = entries.reduce((sum, entry) => sum + entry.fpsValues.length, 0);
     status.textContent = `${entries.length} dataset${entries.length === 1 ? '' : 's'} · ${frames.toLocaleString()} valid rendered frames`;
+  }
+  if (meta) {
+    meta.textContent = `Rendered frame-time and FPS overview · ${entries.length} dataset${entries.length === 1 ? '' : 's'}`;
   }
 
   window.currentChartType = 'analysisboard';
@@ -1388,6 +1400,9 @@ function buildAnalysisBoard(indices, { silent = false } = {}) {
   window.analysisBoardReady = true;
   const clearButton = document.getElementById('clearChartBtn');
   if (clearButton) clearButton.disabled = false;
+  const exportButton = document.getElementById('exportAnalysisBoardPngBtn');
+  if (exportButton) exportButton.disabled = !window.htmlToImage;
+  syncVisualizationActionLabels();
   syncVisualizationResultUi('board');
   return true;
 }
@@ -1482,6 +1497,8 @@ function clearChart() {
   const clearChartBtn = document.getElementById('clearChartBtn');
   if (clearChartBtn) {
     clearChartBtn.disabled = true;
+    clearChartBtn.textContent = visualizationResultMode === 'board' ? 'Clear board' : 'Clear chart';
+    clearChartBtn.setAttribute('aria-label', visualizationResultMode === 'board' ? 'Clear analysis board' : 'Clear chart');
   }
   setResetZoomEnabled(false);
   setChartBusy(false);
@@ -1506,10 +1523,35 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function isAnalysisBoardModeSelected() {
+  return (document.getElementById('vizResultMode')?.value || visualizationResultMode) === 'board';
+}
+
 function getAddToChartButtonLabel() {
+  if (isAnalysisBoardModeSelected()) return 'Build analysis board';
   const chartTypeSelect = document.getElementById('chartTypeSelect')?.value;
   const isSummary = window.currentChartType === 'summarybar' || chartTypeSelect === 'summarybar';
   return isSummary ? 'Build summary bar' : 'Add to chart';
+}
+
+function hasVisualizationResult() {
+  return isAnalysisBoardModeSelected()
+    ? Boolean(window.analysisBoardReady)
+    : Boolean(window.chartDatasets?.length);
+}
+
+function syncVisualizationActionLabels() {
+  const boardMode = isAnalysisBoardModeSelected();
+  const addButton = document.getElementById('addToChartBtn');
+  const clearButton = document.getElementById('clearChartBtn');
+  if (addButton && addButton.getAttribute('aria-busy') !== 'true') {
+    addButton.textContent = getAddToChartButtonLabel();
+    addButton.setAttribute('aria-label', boardMode ? 'Build analysis board' : 'Add selected datasets to chart');
+  }
+  if (clearButton) {
+    clearButton.textContent = boardMode ? 'Clear board' : 'Clear chart';
+    clearButton.setAttribute('aria-label', boardMode ? 'Clear analysis board' : 'Clear chart');
+  }
 }
 
 function setChartBusy(busy) {
@@ -1517,19 +1559,27 @@ function setChartBusy(busy) {
   const clearChartBtn = document.getElementById('clearChartBtn');
   const container = document.getElementById('chartContainer');
   const statusLine = document.getElementById('chartStatusLine');
+  const boardMode = isAnalysisBoardModeSelected();
   if (btn) {
     btn.disabled = busy;
+    btn.setAttribute('aria-busy', String(busy));
     if (busy) {
       const selectedCount = window.getDatasetPickerIndices?.('datasetSelect').length || 0;
-      btn.textContent = selectedCount === 1 ? 'Adding 1 dataset…' : `Adding ${selectedCount} datasets…`;
-      if (statusLine) statusLine.textContent = `Preparing chart for ${selectedCount} selected dataset${selectedCount === 1 ? '' : 's'}.`;
+      btn.textContent = boardMode
+        ? `Building board for ${selectedCount} dataset${selectedCount === 1 ? '' : 's'}…`
+        : (selectedCount === 1 ? 'Adding 1 dataset…' : `Adding ${selectedCount} datasets…`);
+      if (statusLine) {
+        statusLine.textContent = boardMode
+          ? `Preparing analysis board for ${selectedCount} selected dataset${selectedCount === 1 ? '' : 's'}.`
+          : `Preparing chart for ${selectedCount} selected dataset${selectedCount === 1 ? '' : 's'}.`;
+      }
     } else {
-      btn.textContent = getAddToChartButtonLabel();
+      syncVisualizationActionLabels();
       updateChartStatusLine();
     }
   }
   if (clearChartBtn) {
-    clearChartBtn.disabled = busy || !window.chartDatasets?.length;
+    clearChartBtn.disabled = busy || !hasVisualizationResult();
   }
   container?.classList.toggle('chart-busy', busy);
   container?.setAttribute('aria-busy', String(busy));
@@ -2141,6 +2191,119 @@ function updateDatasetOrder () {
   updateChartStatusLine();
 }
 
+function getBoardExportBackground() {
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:-9999px;visibility:hidden;background:var(--v2-bg, var(--bg, #1a1a1a))';
+  document.body.appendChild(probe);
+  const color = getComputedStyle(probe).backgroundColor || '#1a1a1a';
+  probe.remove();
+  return color;
+}
+
+function sanitizeExportFilename(value) {
+  return String(value || 'analysis-board')
+    .trim()
+    .replace(/[^a-z0-9-_]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'analysis-board';
+}
+
+function waitForBoardExportLayout() {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)));
+  });
+}
+
+async function exportAnalysisBoardPng() {
+  const toPng = window.htmlToImage?.toPng;
+  if (typeof toPng !== 'function') {
+    window.notify?.('PNG export library failed to load. Check your connection and reload.', 'error');
+    return;
+  }
+  if (!window.analysisBoardReady) {
+    window.notify?.('Build the analysis board before exporting it.', 'warning');
+    return;
+  }
+
+  const target = document.getElementById('analysisBoard');
+  const button = document.getElementById('exportAnalysisBoardPngBtn');
+  const titleInput = document.getElementById('analysisBoardTitleInput');
+  const heading = document.getElementById('analysisBoardHeading');
+  const meta = document.getElementById('analysisBoardExportMeta');
+  const footer = document.getElementById('analysisBoardExportFooter');
+  if (!target || !heading) return;
+
+  const title = titleInput?.value.trim() || heading.textContent.trim() || 'Performance overview';
+  heading.textContent = title;
+  const originalMeta = meta?.textContent || '';
+  const originalFooter = footer?.textContent || '';
+  const originalInlineStyle = target.getAttribute('style');
+  const exportedAt = new Date();
+  const dateText = exportedAt.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Rendering board…';
+  }
+  window.notify?.('Rendering analysis-board PNG…', 'info');
+
+  try {
+    if (meta) meta.textContent = `${originalMeta} · Exported ${dateText}`;
+    if (footer) footer.textContent = `Generated with Frame Timing Analyzer · ${dateText}`;
+    target.classList.add('analysis-board-exporting');
+    target.style.width = '1600px';
+    target.style.maxWidth = '1600px';
+    target.style.margin = '0';
+
+    await waitForBoardExportLayout();
+    resizeAnalysisBoardCharts();
+    await waitForBoardExportLayout();
+
+    const width = 1600;
+    const height = Math.ceil(target.scrollHeight);
+    const url = await toPng(target, {
+      backgroundColor: getBoardExportBackground(),
+      pixelRatio: 2,
+      cacheBust: true,
+      width,
+      height,
+      style: {
+        width: `${width}px`,
+        maxWidth: 'none',
+        margin: '0'
+      }
+    });
+
+    const link = document.createElement('a');
+    const timestamp = exportedAt.toISOString().replace(/[:.]/g, '-');
+    link.href = url;
+    link.download = `${sanitizeExportFilename(title)}-${timestamp}.png`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.notify?.('Analysis board exported as one high-resolution PNG.', 'success');
+  } catch (error) {
+    console.error('Analysis-board export failed:', error);
+    window.notify?.(`Could not export analysis board: ${error.message}`, 'error');
+  } finally {
+    target.classList.remove('analysis-board-exporting');
+    if (originalInlineStyle == null) target.removeAttribute('style');
+    else target.setAttribute('style', originalInlineStyle);
+    if (meta) meta.textContent = originalMeta;
+    if (footer) footer.textContent = originalFooter;
+    await waitForBoardExportLayout();
+    resizeAnalysisBoardCharts();
+    if (button) {
+      button.disabled = !window.analysisBoardReady;
+      button.removeAttribute('aria-busy');
+      button.textContent = 'Export board PNG';
+    }
+  }
+}
+
 /**
  * Exports a Chart.js instance as a PNG. Chart.js canvases are transparent,
  * so we composite onto a solid background matching the app theme first.
@@ -2223,6 +2386,8 @@ window.getChartThemeColors = getChartThemeColors;
 window.refreshChartTheme = refreshChartTheme;
 
 window.exportChartPng = exportChartPng;
+window.exportAnalysisBoardPng = exportAnalysisBoardPng;
+window.syncVisualizationActionLabels = syncVisualizationActionLabels;
 window.setVisualizationResultMode = setVisualizationResultMode;
 window.buildAnalysisBoard = buildAnalysisBoard;
 window.refreshDatasetDisplayNames = refreshDatasetDisplayNames;

@@ -148,11 +148,13 @@ function checkApplicationDependencies() {
     });
 
   if (!window.htmlToImage) {
-    const button = document.getElementById('exportStatsPngBtn');
-    if (button) {
-      button.disabled = true;
-      button.title = 'The PNG export dependency did not load.';
-    }
+    ['exportStatsPngBtn', 'exportAnalysisBoardPngBtn'].forEach(id => {
+      const button = document.getElementById(id);
+      if (button) {
+        button.disabled = true;
+        button.title = 'The PNG export dependency did not load.';
+      }
+    });
   }
 
   if (window.Chart) {
@@ -290,6 +292,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('exportChartPngBtn')
     ?.addEventListener('click', () => window.exportChartPng?.(window.mainChart, 'frame-timing-chart'));
+
+  document.getElementById('exportAnalysisBoardPngBtn')
+    ?.addEventListener('click', () => window.exportAnalysisBoardPng?.());
 
   document.getElementById('exportReliabilityPngBtn')
     ?.addEventListener('click', () => window.exportReliabilityChartPng?.());
@@ -571,7 +576,30 @@ function setupVisualizationResultMode() {
   const singleControls = document.getElementById('singleChartBuilderControls');
   const boardHint = document.getElementById('analysisBoardSetupHint');
   const addButton = document.getElementById('addToChartBtn');
+  const clearButton = document.getElementById('clearChartBtn');
+  const titleInput = document.getElementById('analysisBoardTitleInput');
+  const boardHeading = document.getElementById('analysisBoardHeading');
   if (!select || !singleControls || !boardHint || !addButton) return;
+
+  const applyBoardTitle = () => {
+    if (!titleInput || !boardHeading) return;
+    const title = titleInput.value.trim() || 'Performance overview';
+    boardHeading.textContent = title;
+    try { localStorage.setItem('fta-analysis-board-title', title); } catch (error) { /* storage unavailable */ }
+  };
+
+  if (titleInput) {
+    try {
+      const saved = localStorage.getItem('fta-analysis-board-title');
+      if (saved) titleInput.value = saved;
+    } catch (error) { /* storage unavailable */ }
+    titleInput.addEventListener('input', applyBoardTitle);
+    titleInput.addEventListener('blur', () => {
+      if (!titleInput.value.trim()) titleInput.value = 'Performance overview';
+      applyBoardTitle();
+    });
+    applyBoardTitle();
+  }
 
   const sync = ({ changed = false } = {}) => {
     const boardMode = select.value === 'board';
@@ -579,11 +607,20 @@ function setupVisualizationResultMode() {
     boardHint.classList.toggle('hidden', !boardMode);
     addButton.textContent = boardMode ? 'Build analysis board' : 'Add to chart';
     addButton.setAttribute('aria-label', boardMode ? 'Build analysis board' : 'Add selected datasets to chart');
+    if (clearButton) {
+      clearButton.textContent = boardMode ? 'Clear board' : 'Clear chart';
+      clearButton.setAttribute('aria-label', boardMode ? 'Clear analysis board' : 'Clear chart');
+    }
     if (changed) window.setVisualizationResultMode?.(select.value);
   };
 
   select.addEventListener('change', () => sync({ changed: true }));
-  sync();
+  // Browsers may restore the select value after DOMContentLoaded without firing
+  // change. Re-sync on the next frame and on pageshow so the button labels and
+  // internal result mode always match the visible selection.
+  sync({ changed: true });
+  requestAnimationFrame(() => sync({ changed: true }));
+  window.addEventListener('pageshow', () => requestAnimationFrame(() => sync({ changed: true })));
 }
 
 // Show/hide visualization controls based on chart type.
@@ -614,9 +651,11 @@ function updateVizControlsForChartType() {
         : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.';
   }
 
-  const addBtn = document.getElementById('addToChartBtn');
-  if (addBtn) {
-    addBtn.textContent = isSummary ? 'Build summary bar' : 'Add to chart';
+  if (typeof window.syncVisualizationActionLabels === 'function') {
+    window.syncVisualizationActionLabels();
+  } else {
+    const addBtn = document.getElementById('addToChartBtn');
+    if (addBtn) addBtn.textContent = isSummary ? 'Build summary bar' : 'Add to chart';
   }
 }
 

@@ -4141,3 +4141,99 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
     height: clamp(280px, 42vh, 430px);
   }
 }
+
+
+/* =============================================================================
+   Analysis board phase 2: mode-correct actions + combined high-resolution export
+   ============================================================================= */
+
+#appShellV2 .analysis-board-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+#appShellV2 .analysis-board-toolbar > label {
+  color: var(--v2-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#appShellV2 .analysis-board-title-input {
+  width: clamp(180px, 22vw, 340px);
+  min-width: 0;
+  height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-field);
+  color: var(--v2-ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+#appShellV2 .analysis-board-title-input:focus-visible {
+  outline: 2px solid var(--v2-accent-muted);
+  outline-offset: 2px;
+}
+
+#appShellV2 .analysis-board-export-meta {
+  margin: 4px 0 0;
+  color: var(--v2-muted);
+  font-size: 11px;
+}
+
+#appShellV2 .analysis-board-export-footer {
+  display: none;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--v2-border-subtle);
+  color: var(--v2-muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting {
+  box-sizing: border-box;
+  width: 1600px !important;
+  max-width: none !important;
+  padding: 24px;
+  background: var(--v2-bg);
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting .analysis-board-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 16px;
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting .analysis-board-card {
+  padding: 16px;
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting .analysis-board-canvas-wrap {
+  height: 360px !important;
+  min-height: 360px;
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting .analysis-board-export-footer {
+  display: block;
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting .analysis-board-head h2 {
+  font-size: 24px;
+}
+
+#appShellV2 .analysis-board.analysis-board-exporting .analysis-board-legend-item {
+  max-width: 350px;
+}
+
+@media (max-width: 900px), (max-height: 760px) {
+  #appShellV2 .analysis-board-toolbar {
+    flex-wrap: wrap;
+  }
+
+  #appShellV2 .analysis-board-title-input {
+    width: min(300px, 42vw);
+  }
+}
