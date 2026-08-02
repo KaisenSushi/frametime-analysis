@@ -4,6 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Frame Timing Analyzer</title>
+  <script>
+    (function () {
+      const allowed = ['graphite', 'light', 'nord', 'gruvbox', 'catppuccin', 'purple'];
+      let theme = 'graphite';
+      try {
+        const saved = localStorage.getItem('fta-theme');
+        if (allowed.includes(saved)) theme = saved;
+      } catch (error) {
+        // Storage can be unavailable in privacy-restricted contexts.
+      }
+      document.documentElement.dataset.theme = theme;
+      window.__ftaInitialTheme = theme;
+    })();
+  </script>
   <link rel="stylesheet" href="style.css?v=20260802b" />
   <link rel="stylesheet" href="v2-shell.css?v=20260802b" />
   <link rel="stylesheet" href="v2-theme.css?v=20260802b" />
@@ -41,6 +55,17 @@
         <button type="button" class="v2-mode-btn" role="tab" data-mode="reliability" id="v2ModeReliability" aria-selected="false" aria-controls="v2ModePanelReliability" tabindex="-1">Reliability</button>
       </nav>
       <div class="v2-topbar-actions">
+        <label class="theme-control" for="themeSelect">
+          <span class="theme-control-label">Theme</span>
+          <select id="themeSelect" class="theme-select" aria-label="Color theme">
+            <option value="graphite">Graphite</option>
+            <option value="light">Light</option>
+            <option value="nord">Nord</option>
+            <option value="gruvbox">Gruvbox</option>
+            <option value="catppuccin">Catppuccin</option>
+            <option value="purple">Purple</option>
+          </select>
+        </label>
         <button id="toggleAdvancedBtn" class="secondary-button mini advanced-metrics-toggle" type="button" aria-pressed="false">Advanced metrics OFF</button>
         <a class="v2-topbar-link" href="https://github.com/BoringBoredom/Frame-Time-Analysis/raw/main/presentmon/presentmon.zip" target="_blank" rel="noopener" aria-label="Download PresentMon (opens in a new tab)">PresentMon</a>
         <a class="v2-topbar-link" href="https://discord.gg/kaisenn" target="_blank" rel="noopener" aria-label="Open Discord community (opens in a new tab)">Discord</a>
@@ -81,7 +106,7 @@
               <div class="viz-panel-head">
                 <h3 id="chartBuilderHeading">Chart builder</h3>
                 <div class="stats-link-row">
-                  <span class="dataset-selection-count" id="vizDatasetCount" aria-live="polite">0/0 selected</span>
+                  <span id="vizDatasetCount" class="dataset-selection-count" aria-live="polite">0/0 selected</span>
                   <button type="button" class="stats-link" id="vizSelectAll">Select all</button>
                   <button type="button" class="stats-link" id="vizClearSel">Deselect all</button>
                 </div>
@@ -210,7 +235,7 @@
               <div class="viz-panel-head">
                 <h3 id="statsDatasetsHeading">Datasets</h3>
                 <div class="stats-link-row">
-                  <span class="dataset-selection-count" id="statsDatasetCount" aria-live="polite">0/0 selected</span>
+                  <span id="statsDatasetCount" class="dataset-selection-count" aria-live="polite">0/0 selected</span>
                   <button type="button" class="stats-link" id="statsSelectAll">Select all</button>
                   <button type="button" class="stats-link" id="statsClearSel">Deselect all</button>
                 </div>
@@ -313,7 +338,7 @@
               <div class="viz-panel-head">
                 <h3 id="reliabilityDatasetsHeading">Datasets</h3>
                 <div class="stats-link-row">
-                  <span class="dataset-selection-count" id="reliabilityDatasetCount" aria-live="polite">0/0 selected</span>
+                  <span id="reliabilityDatasetCount" class="dataset-selection-count" aria-live="polite">0/0 selected</span>
                   <button type="button" class="stats-link" id="reliabilitySelectAll">Select all</button>
                   <button type="button" class="stats-link" id="reliabilityClearSel">Deselect all</button>
                 </div>

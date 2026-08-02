@@ -1,3 +1,48 @@
+const APP_THEMES = Object.freeze([
+  'graphite',
+  'light',
+  'nord',
+  'gruvbox',
+  'catppuccin',
+  'purple'
+]);
+
+function applyAppTheme(theme, { persist = true } = {}) {
+  const nextTheme = APP_THEMES.includes(theme) ? theme : 'graphite';
+  document.documentElement.dataset.theme = nextTheme;
+
+  const select = document.getElementById('themeSelect');
+  if (select && select.value !== nextTheme) select.value = nextTheme;
+
+  if (persist) {
+    try { localStorage.setItem('fta-theme', nextTheme); }
+    catch (error) { /* Storage may be unavailable. */ }
+  }
+
+  requestAnimationFrame(() => {
+    window.refreshChartTheme?.();
+    window.refreshReliabilityTheme?.();
+  });
+
+  document.dispatchEvent(new CustomEvent('appThemeChanged', {
+    detail: { theme: nextTheme }
+  }));
+}
+
+function setupThemeSelector() {
+  const select = document.getElementById('themeSelect');
+  if (!select) return;
+  const initial = APP_THEMES.includes(document.documentElement.dataset.theme)
+    ? document.documentElement.dataset.theme
+    : (window.__ftaInitialTheme || 'graphite');
+  select.value = initial;
+  applyAppTheme(initial, { persist: false });
+  select.addEventListener('change', () => applyAppTheme(select.value));
+}
+
+window.applyAppTheme = applyAppTheme;
+window.APP_THEMES = APP_THEMES;
+
 function checkApplicationDependencies() {
   const missing = new Set(window.__ftaDependencyFailures || []);
   if (!window.Chart) missing.add('Chart.js');
@@ -79,6 +124,7 @@ function setupTopbarHeightSync() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  setupThemeSelector();
   setupTopbarHeightSync();
   checkApplicationDependencies();
   updateMetricDropdowns();

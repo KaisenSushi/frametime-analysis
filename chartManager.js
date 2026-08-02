@@ -18,9 +18,36 @@ const BENCHMARK_COLORS = [
   '#6366F1'  // indigo
 ];
 
-const CHART_TEXT = 'rgba(245,245,245,0.9)';
-const CHART_GRID = 'rgba(255,255,255,0.16)';
-const CHART_BORDER = 'rgba(255,255,255,0.28)';
+const CHART_THEME_FALLBACKS = Object.freeze({
+  text: 'rgba(245,245,245,0.9)',
+  grid: 'rgba(255,255,255,0.16)',
+  border: 'rgba(255,255,255,0.28)',
+  tooltipBg: 'rgba(10,10,10,0.96)',
+  tooltipTitle: 'rgba(245,245,245,0.95)',
+  tooltipBody: 'rgba(245,245,245,0.88)',
+  insideLabel: 'rgba(255,255,255,0.95)',
+  zoomFill: 'rgba(255,255,255,0.10)',
+  zoomBorder: 'rgba(255,255,255,0.35)'
+});
+
+function readChartCssVariable(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function getChartThemeColors() {
+  return {
+    text: readChartCssVariable('--chart-text', CHART_THEME_FALLBACKS.text),
+    grid: readChartCssVariable('--chart-grid', CHART_THEME_FALLBACKS.grid),
+    border: readChartCssVariable('--chart-border', CHART_THEME_FALLBACKS.border),
+    tooltipBg: readChartCssVariable('--chart-tooltip-bg', CHART_THEME_FALLBACKS.tooltipBg),
+    tooltipTitle: readChartCssVariable('--chart-tooltip-title', CHART_THEME_FALLBACKS.tooltipTitle),
+    tooltipBody: readChartCssVariable('--chart-tooltip-body', CHART_THEME_FALLBACKS.tooltipBody),
+    insideLabel: readChartCssVariable('--chart-inside-label', CHART_THEME_FALLBACKS.insideLabel),
+    zoomFill: readChartCssVariable('--chart-zoom-fill', CHART_THEME_FALLBACKS.zoomFill),
+    zoomBorder: readChartCssVariable('--chart-zoom-border', CHART_THEME_FALLBACKS.zoomBorder)
+  };
+}
 
 function getBenchmarkColor(index) {
   return BENCHMARK_COLORS[index % BENCHMARK_COLORS.length];
@@ -93,8 +120,9 @@ function initChartDefaults() {
   const d = Chart.defaults;
   d.animation = false;
   d.font.size = 13;
-  d.color = CHART_TEXT;
-  d.borderColor = CHART_BORDER;
+  const theme = getChartThemeColors();
+  d.color = theme.text;
+  d.borderColor = theme.border;
   d.normalized = true;
 }
 
@@ -150,10 +178,10 @@ const summaryBarLabelsPlugin = {
         const textWidth = ctx.measureText(text).width;
 
         if (barWidth > textWidth + 16) {
-          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.fillStyle = getChartThemeColors().insideLabel;
           ctx.fillText(text, barStart + 8, y);
         } else {
-          ctx.fillStyle = CHART_TEXT;
+          ctx.fillStyle = getChartThemeColors().text;
           ctx.fillText(text, barEnd + 6, y);
         }
       });
@@ -600,13 +628,14 @@ function getControllerType(chartType) {
 }
 
 function styleLinearAxis(config, title) {
+  const theme = getChartThemeColors();
   return {
     type: 'linear',
     ...config,
-    title: { display: true, text: title, color: CHART_TEXT, font: { size: 13, weight: '600' } },
-    ticks: { color: CHART_TEXT, maxTicksLimit: 12 },
-    grid: { color: CHART_GRID },
-    border: { color: CHART_BORDER }
+    title: { display: true, text: title, color: theme.text, font: { size: 13, weight: '600' } },
+    ticks: { color: theme.text, maxTicksLimit: 12 },
+    grid: { color: theme.grid },
+    border: { color: theme.border }
   };
 }
 
@@ -621,6 +650,7 @@ function getYAxisLabel(metric) {
 }
 
 function buildZoomOptions() {
+  const theme = getChartThemeColors();
   return {
     pan: {
       enabled: true,
@@ -632,8 +662,8 @@ function buildZoomOptions() {
       drag: {
         enabled: true,
         modifierKey: 'ctrl',
-        backgroundColor: 'rgba(90,90,90,0.15)',
-        borderColor: 'rgba(255,255,255,0.35)',
+        backgroundColor: theme.zoomFill,
+        borderColor: theme.zoomBorder,
         borderWidth: 1
       },
       pinch: { enabled: true },
@@ -712,21 +742,22 @@ function computeSeriesExtents(datasets) {
 }
 
 function buildChartScales(chartType) {
+  const theme = getChartThemeColors();
   const scales = {};
   const xTitle = 'Frame #';
   const yTitle = getYAxisLabel(window.currentChartMetric);
 
   if (chartType === 'histogram') {
     const yTitle = isHistogramPercentMode() ? '% of frames' : 'Count';
-    scales.x = { type: 'category', title: { display: true, text: 'Bin Range', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { color: CHART_GRID } };
+    scales.x = { type: 'category', title: { display: true, text: 'Bin Range', color: theme.text }, ticks: { color: theme.text }, grid: { color: theme.grid } };
     scales.y = styleLinearAxis({}, yTitle);
   } else if (chartType === 'summarybar') {
     scales.x = styleLinearAxis({ min: 0, grid: { display: true } }, getYAxisLabel(window.currentChartMetric));
     scales.y = {
       type: 'category',
       grid: { display: false },
-      ticks: { color: CHART_TEXT, autoSkip: false },
-      border: { color: CHART_BORDER }
+      ticks: { color: theme.text, autoSkip: false },
+      border: { color: theme.border }
     };
   } else if (chartType === 'qqplot') {
     const yTitle = getYAxisLabel(window.currentChartMetric);
@@ -751,7 +782,7 @@ function buildChartScales(chartType) {
     }
   } else if (chartType === 'boxplot' || chartType === 'violin') {
     // Both use horizontal layout: categories on Y, values on X.
-    scales.y = { type: 'category', title: { display: true, text: 'Dataset', color: CHART_TEXT }, ticks: { color: CHART_TEXT }, grid: { display: false } };
+    scales.y = { type: 'category', title: { display: true, text: 'Dataset', color: theme.text }, ticks: { color: theme.text }, grid: { display: false } };
     scales.x = styleLinearAxis({ beginAtZero: false, grace: '10%' }, yTitle);
   } else {
     scales.x = styleLinearAxis({}, xTitle);
@@ -813,6 +844,7 @@ function renderChart(chartType, opts = {}) {
   }
 
   const ctrlType = getControllerType(chartType);
+  const theme = getChartThemeColors();
   const scales = buildChartScales(chartType);
 
   const cfg = {
@@ -828,10 +860,10 @@ function renderChart(chartType, opts = {}) {
       plugins: {
         decimation: false,
         tooltip: {
-          backgroundColor: 'rgba(10,10,10,0.96)',
-          titleColor: CHART_TEXT,
-          bodyColor: CHART_TEXT,
-          borderColor: CHART_BORDER,
+          backgroundColor: theme.tooltipBg,
+          titleColor: theme.tooltipTitle,
+          bodyColor: theme.tooltipBody,
+          borderColor: theme.border,
           borderWidth: 1,
           callbacks: {
             label(ctx) {
@@ -881,7 +913,7 @@ function renderChart(chartType, opts = {}) {
           position: 'bottom',
           align: 'start',
           labels: {
-            color: CHART_TEXT,
+            color: theme.text,
             boxWidth: 14,
             padding: 12,
             usePointStyle: true,
@@ -1711,4 +1743,27 @@ window.updateDatasetOrder = updateDatasetOrder;
 window.removeChartSeries = removeChartSeries;
 window.resetChartZoom = resetChartZoom;
 window.setResetZoomEnabled = setResetZoomEnabled;
+
+function refreshChartTheme() {
+  initChartDefaults();
+  const chart = window.mainChart;
+  if (!chart) return;
+
+  const theme = getChartThemeColors();
+  chart.options.scales = buildChartScales(window.currentChartType);
+  if (chart.options.plugins?.tooltip) {
+    chart.options.plugins.tooltip.backgroundColor = theme.tooltipBg;
+    chart.options.plugins.tooltip.titleColor = theme.tooltipTitle;
+    chart.options.plugins.tooltip.bodyColor = theme.tooltipBody;
+    chart.options.plugins.tooltip.borderColor = theme.border;
+  }
+  if (chart.options.plugins?.legend?.labels) {
+    chart.options.plugins.legend.labels.color = theme.text;
+  }
+  chart.update('none');
+}
+
+window.getChartThemeColors = getChartThemeColors;
+window.refreshChartTheme = refreshChartTheme;
+
 window.exportChartPng = exportChartPng;

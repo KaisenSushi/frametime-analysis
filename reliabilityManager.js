@@ -1,5 +1,19 @@
 let reliabilityChart = null;
 
+function getReliabilityThemeColors() {
+  const root = getComputedStyle(document.documentElement);
+  const read = (name, fallback) => root.getPropertyValue(name).trim() || fallback;
+  return {
+    text: read('--chart-text', 'rgba(245,245,245,0.9)'),
+    grid: read('--chart-grid', 'rgba(255,255,255,0.16)'),
+    border: read('--chart-border', 'rgba(255,255,255,0.28)'),
+    tooltipBg: read('--chart-tooltip-bg', 'rgba(10,10,10,0.96)'),
+    tooltipTitle: read('--chart-tooltip-title', 'rgba(245,245,245,0.95)'),
+    tooltipBody: read('--chart-tooltip-body', 'rgba(245,245,245,0.88)')
+  };
+}
+
+
 function buildEmpiricalCdf(values, maxPoints = 5000) {
   const sorted = (values || [])
     .filter(Number.isFinite)
@@ -173,10 +187,10 @@ function renderReliabilityCdf(datasets, metric) {
           }
         },
         tooltip: {
-          backgroundColor: 'rgba(10,10,10,0.96)',
-          titleColor: 'rgba(245,245,245,0.95)',
-          bodyColor: 'rgba(245,245,245,0.88)',
-          borderColor: 'rgba(255,255,255,0.28)',
+          backgroundColor: theme.tooltipBg,
+          titleColor: theme.tooltipTitle,
+          bodyColor: theme.tooltipBody,
+          borderColor: theme.border,
           borderWidth: 1,
           callbacks: {
             label(context) {
@@ -194,7 +208,7 @@ function renderReliabilityCdf(datasets, metric) {
             text: metricLabel
           },
           grid: {
-            color: 'rgba(255,255,255,0.16)'
+            color: theme.grid
           }
         },
         y: {
@@ -208,7 +222,7 @@ function renderReliabilityCdf(datasets, metric) {
             callback: value => `${Math.round(value * 100)}%`
           },
           grid: {
-            color: 'rgba(255,255,255,0.16)'
+            color: theme.grid
           }
         }
       }
@@ -252,7 +266,27 @@ function exportReliabilityChartPng() {
   window.exportChartPng?.(reliabilityChart, 'reliability-cdf');
 }
 
+
+function refreshReliabilityTheme() {
+  if (!reliabilityChart) return;
+  const theme = getReliabilityThemeColors();
+  if (reliabilityChart.options.plugins?.tooltip) {
+    reliabilityChart.options.plugins.tooltip.backgroundColor = theme.tooltipBg;
+    reliabilityChart.options.plugins.tooltip.titleColor = theme.tooltipTitle;
+    reliabilityChart.options.plugins.tooltip.bodyColor = theme.tooltipBody;
+    reliabilityChart.options.plugins.tooltip.borderColor = theme.border;
+  }
+  Object.values(reliabilityChart.options.scales || {}).forEach(scale => {
+    if (scale.grid) scale.grid.color = theme.grid;
+    if (scale.ticks) scale.ticks.color = theme.text;
+    if (scale.title) scale.title.color = theme.text;
+    if (scale.border) scale.border.color = theme.border;
+  });
+  reliabilityChart.update('none');
+}
+
 window.buildEmpiricalCdf = buildEmpiricalCdf;
 window.renderReliabilityPage = renderReliabilityPage;
 window.resetReliabilityPanel = resetReliabilityPanel;
 window.exportReliabilityChartPng = exportReliabilityChartPng;
+window.refreshReliabilityTheme = refreshReliabilityTheme;
