@@ -237,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
       advBtn.textContent = window.showAdvancedMetrics ? 'Advanced metrics ON' : 'Advanced metrics OFF';
       advBtn.setAttribute('aria-pressed', String(window.showAdvancedMetrics));
       updateMetricDropdowns();
-      window.renderReliabilityPage?.();
+      window.markReliabilityStale?.('Available metrics changed. Update reliability to refresh the results.');
     });
   }
 
@@ -249,6 +249,8 @@ document.addEventListener('DOMContentLoaded', () => {
     fileInput.addEventListener('change', handleFileUpload);  // from dataManager.js
     setupDragAndDrop(); // if you have a function for drag-and-drop
   }
+  document.getElementById('cancelImportBtn')
+    ?.addEventListener('click', () => window.cancelCaptureImport?.());
 
   // 4. "Clear All" datasets
   const clearBtn = document.getElementById('clearAllDatasets');
@@ -274,7 +276,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // 7. Chart height range
   const chartHeightRange = document.getElementById('chartHeight');
   if (chartHeightRange) {
-    chartHeightRange.addEventListener('input', onChartHeightChange);
+    chartHeightRange.addEventListener('input', event => {
+      chartHeightRange.dataset.userSet = 'true';
+      onChartHeightChange(event);
+    });
   }
 
   // 8. Reset zoom
@@ -307,29 +312,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const updateReliabilityBtn = document.getElementById('updateReliabilityBtn');
   const reliabilityMetricSelect = document.getElementById('reliabilityMetricSelect');
-  updateReliabilityBtn?.addEventListener('click', () => {
+  updateReliabilityBtn?.addEventListener('click', async () => {
+    if (updateReliabilityBtn.getAttribute('aria-busy') === 'true') return;
+
     const selectedCount = getDatasetPickerIndices('reliabilityDatasetSelect').length;
+    if (!selectedCount) {
+      window.notify?.('Select at least one dataset to update reliability.', 'warning');
+      window.markReliabilityStale?.('Select at least one dataset.');
+      return;
+    }
+    if (!reliabilityMetricSelect?.value) {
+      window.notify?.('Select a metric to update reliability.', 'warning');
+      window.markReliabilityStale?.('Select a metric.');
+      return;
+    }
+
     updateReliabilityBtn.disabled = true;
     updateReliabilityBtn.setAttribute('aria-busy', 'true');
     updateReliabilityBtn.textContent =
       selectedCount === 1 ? 'Updating 1 dataset…' : `Updating ${selectedCount} datasets…`;
-    requestAnimationFrame(() => {
-      setTimeout(async () => {
-        try {
-          await window.renderReliabilityPage?.();
-        } finally {
-          updateReliabilityBtn.disabled = false;
-          updateReliabilityBtn.removeAttribute('aria-busy');
-          updateReliabilityBtn.textContent = 'Update reliability';
-        }
-      }, 0);
-    });
+
+    try {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const result = await window.renderReliabilityPage?.();
+      if (result?.ok) {
+        window.setV2Step?.('results', { focusPanel: true });
+      }
+    } catch (error) {
+      console.error('Reliability update failed:', error);
+      window.notify?.(`Reliability update failed: ${error.message}`, 'error');
+    } finally {
+      updateReliabilityBtn.disabled = false;
+      updateReliabilityBtn.removeAttribute('aria-busy');
+      updateReliabilityBtn.textContent = 'Update reliability';
+    }
   });
   reliabilityMetricSelect?.addEventListener('change', () => {
-    const resultsPanel = document.getElementById('reliabilityResultsV2');
-    if (resultsPanel && !resultsPanel.classList.contains('hidden')) {
-      window.renderReliabilityPage?.();
-    }
+    window.markReliabilityStale?.('Metric changed. Update reliability to refresh the results.');
   });
 
   // 10. Toggle buttons (metric chips manage their own click handlers)
@@ -341,9 +360,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 13. Initialize chart height
+  // 13. Initialize chart height from the available viewport. The user can
+  // override this at any time with the height slider.
   if (chartHeightRange) {
+    applyAdaptiveChartHeight(chartHeightRange);
     onChartHeightChange({ target: chartHeightRange });
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      if (chartHeightRange.dataset.userSet === 'true' || window.currentChartType === 'summarybar') return;
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        applyAdaptiveChartHeight(chartHeightRange);
+        onChartHeightChange({ target: chartHeightRange });
+      }, 120);
+    });
   }
 
   // 14. Register for dataset updates
@@ -353,10 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.updateMetricDropdowns();
     }
     syncColorPickerFromSelection();
-    const reliabilityResults = document.getElementById('reliabilityResultsV2');
-    if (reliabilityResults && !reliabilityResults.classList.contains('hidden')) {
-      window.renderReliabilityPage?.();
-    }
+    window.markReliabilityStale?.('Datasets changed. Update reliability to refresh the results.');
   });
 
   // 17. Any other initialization logic you need
@@ -458,7 +485,7 @@ function populateAllDatasetSelects() {
           if (typeof window.updateMetricDropdowns === 'function') {
             window.updateMetricDropdowns();
           }
-          window.renderReliabilityPage?.();
+          window.markReliabilityStale?.('Selection changed. Update reliability to refresh the results.');
         }
         if (picker.id === 'statDatasetSelect' && typeof window.updateMetricDropdowns === 'function') {
           window.updateMetricDropdowns();
@@ -592,7 +619,7 @@ function setupStatsSidebarControls() {
     'reliabilityClearSel',
     () => {
       window.updateMetricDropdowns?.();
-      window.renderReliabilityPage?.();
+      window.markReliabilityStale?.('Selection changed. Update reliability to refresh the results.');
     }
   );
 
@@ -807,6 +834,21 @@ function applyColorToSelectedDatasets() {
 function randomColor() {
   const randomComponent = () => Math.floor(30 + Math.random() * 190).toString(16).padStart(2, '0');
   return `#${randomComponent()}${randomComponent()}${randomComponent()}`;
+}
+
+// Choose a sensible chart height for short or unusual desktop viewports.
+// This avoids scaling the entire interface, which would blur text and break hit
+// targets. Summary bars still use their content-aware height calculation.
+function applyAdaptiveChartHeight(range) {
+  if (!range || range.dataset.userSet === 'true') return;
+  const topbar = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--topbar-height')
+  ) || 72;
+  const available = Math.max(280, window.innerHeight - topbar - 190);
+  const target = Math.round(Math.min(520, Math.max(300, available)));
+  const min = Number(range.min) || 280;
+  const max = Number(range.max) || 900;
+  range.value = String(Math.min(max, Math.max(min, target)));
 }
 
 // Chart height change

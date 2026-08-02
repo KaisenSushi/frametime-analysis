@@ -1214,7 +1214,7 @@ function renderBootstrapIntervalDiagnostics(container, result, metric = 'FrameTi
   container.appendChild(section);
 }
 
-async function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime') {
+async function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime', precomputedSeries = null) {
   const content = document.getElementById('reliabilityDiagnosticsContent');
   if (!content) return;
 
@@ -1229,11 +1229,17 @@ async function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTim
     || document.querySelector('.reliability-diagnostics > h2');
   if (heading) heading.textContent = `Dataset diagnostics (${metricLabel})`;
 
-  const entries = selectedDatasets.map((dataset, index) => ({
-    dataset,
-    index,
-    series: collectMetricValues(dataset, metric)
-  }));
+  const entries = selectedDatasets.map((dataset, index) => {
+    const key = String(dataset.id ?? index);
+    const precomputed = precomputedSeries instanceof Map
+      ? precomputedSeries.get(key)
+      : precomputedSeries?.[key];
+    return {
+      dataset,
+      index,
+      series: Array.isArray(precomputed) ? precomputed : collectMetricValues(dataset, metric)
+    };
+  });
 
   entries.forEach(({ dataset, index, series }) => {
     const card = makeDiagnosticsElement('article', 'stats-diagnostics-card');

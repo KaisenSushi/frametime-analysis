@@ -9,7 +9,6 @@
   let shellWired = false;
   let vizStepAdvanceWired = false;
   let statsStepAdvanceWired = false;
-  let reliabilityStepAdvanceWired = false;
 
   function getActiveV2Mode() {
     return document.querySelector('.v2-mode:not(.hidden)')?.getAttribute('data-mode') || null;
@@ -279,42 +278,11 @@
     });
   }
 
-  function wireUpdateReliabilityStepAdvance() {
-    if (reliabilityStepAdvanceWired) return;
-    const btn = document.getElementById('updateReliabilityBtn');
-    if (!btn) return;
-    reliabilityStepAdvanceWired = true;
-
-    btn.addEventListener('click', () => {
-      if (getActiveV2Mode() !== 'reliability') return;
-
-      let seenBusy = false;
-      const started = performance.now();
-
-      const tick = () => {
-        if (getActiveV2Mode() !== 'reliability') return;
-        const busy = btn.getAttribute('aria-busy') === 'true' || btn.disabled;
-        if (busy) seenBusy = true;
-
-        if (seenBusy && !busy) {
-          setStep('results', { focusPanel: true });
-          scheduleChartResize('reliability');
-          return;
-        }
-
-        if (performance.now() - started > 60000) return;
-        requestAnimationFrame(tick);
-      };
-
-      requestAnimationFrame(tick);
-    });
-  }
 
   function init() {
     wireShell();
     wireAddToChartStepAdvance();
     wireCalculateStatsStepAdvance();
-    wireUpdateReliabilityStepAdvance();
     setMode('visualization');
     setStep('setup');
   }

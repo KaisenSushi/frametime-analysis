@@ -429,7 +429,10 @@ function resetDataWorker(error) {
   dataWorker = null;
   dataWorkerUrl = null;
   if (error) {
-    dataWorkerRequests.forEach(({ reject }) => reject(error));
+    dataWorkerRequests.forEach(({ reject, cleanup }) => {
+      cleanup?.();
+      reject(error);
+    });
     dataWorkerRequests.clear();
   }
 }
@@ -446,6 +449,7 @@ function getDataWorker() {
     const request = dataWorkerRequests.get(id);
     if (!request) return;
     dataWorkerRequests.delete(id);
+    request.cleanup?.();
     if (error) request.reject(new Error(error));
     else request.resolve(result);
   };
@@ -455,13 +459,150 @@ function getDataWorker() {
   return dataWorker;
 }
 
-async function parseCaptureFile(file) {
-  const buffer = await file.arrayBuffer();
+let activeImportSession = null;
+
+function makeImportAbortError(message = 'Import cancelled.') {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+function setImportUiBusy(busy) {
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const cancelButton = document.getElementById('cancelImportBtn');
+  if (fileInput) fileInput.disabled = busy;
+  dropZone?.classList.toggle('is-busy', busy);
+  dropZone?.setAttribute('aria-busy', String(busy));
+  if (cancelButton) cancelButton.disabled = !busy;
+}
+
+function updateImportProgress(session, {
+  fileIndex = Math.max(0, session.completedFiles),
+  fileName = '',
+  stage = 'Preparing import…',
+  fileProgress = 0,
+  rowCount = null,
+  forcePercent = null,
+  visible = true
+} = {}) {
+  const panel = document.getElementById('importProgressPanel');
+  const bar = document.getElementById('importProgressBar');
+  const files = document.getElementById('importProgressFiles');
+  const currentFile = document.getElementById('importProgressFile');
+  const percentLabel = document.getElementById('importProgressPercent');
+  const stageLabel = document.getElementById('importProgressStage');
+  if (!panel || !bar) return;
+
+  panel.classList.toggle('hidden', !visible);
+  panel.setAttribute('aria-hidden', String(!visible));
+  if (!visible) return;
+
+  const total = Math.max(1, session.totalFiles || 1);
+  const boundedFileProgress = Math.min(1, Math.max(0, Number(fileProgress) || 0));
+  const rawPercent = forcePercent == null
+    ? ((Math.min(fileIndex, total - 1) + boundedFileProgress) / total) * 100
+    : forcePercent;
+  const percent = Math.min(100, Math.max(0, Math.round(rawPercent)));
+
+  bar.value = percent;
+  bar.setAttribute('aria-valuetext', `${percent}% — ${stage}`);
+  if (files) files.textContent = `${Math.min(fileIndex + 1, total)} of ${total} files`;
+  if (currentFile) currentFile.textContent = fileName || 'Preparing…';
+  if (percentLabel) percentLabel.textContent = `${percent}%`;
+  if (stageLabel) {
+    const rows = Number.isFinite(rowCount) ? ` · ${rowCount.toLocaleString()} rows` : '';
+    stageLabel.textContent = `${stage}${rows}`;
+  }
+}
+
+function finishImportProgress(session, message, { cancelled = false } = {}) {
+  const panel = document.getElementById('importProgressPanel');
+  const title = document.getElementById('importProgressTitle');
+  const stage = document.getElementById('importProgressStage');
+  const file = document.getElementById('importProgressFile');
+  const bar = document.getElementById('importProgressBar');
+  const percent = document.getElementById('importProgressPercent');
+  const files = document.getElementById('importProgressFiles');
+  if (!panel) return;
+
+  panel.classList.remove('hidden');
+  panel.setAttribute('aria-hidden', 'false');
+  if (title) title.textContent = cancelled ? 'Import cancelled' : 'Import complete';
+  if (stage) stage.textContent = message;
+  if (file) file.textContent = cancelled ? 'Completed datasets were kept.' : 'All requested files were processed.';
+  if (files) files.textContent = `${session.completedFiles} of ${session.totalFiles} files`;
+  if (bar) bar.value = cancelled
+    ? Math.round((session.completedFiles / Math.max(1, session.totalFiles)) * 100)
+    : 100;
+  if (percent) percent.textContent = `${bar?.value ?? 100}%`;
+
+  window.setTimeout(() => {
+    if (activeImportSession === session) return;
+    panel.classList.add('hidden');
+    panel.setAttribute('aria-hidden', 'true');
+    if (title) title.textContent = 'Importing captures';
+  }, 1800);
+}
+
+function readFileAsArrayBuffer(file, { signal, onProgress } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(makeImportAbortError());
+      return;
+    }
+
+    const reader = new FileReader();
+    if (activeImportSession) activeImportSession.reader = reader;
+    let settled = false;
+
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+      if (activeImportSession?.reader === reader) activeImportSession.reader = null;
+    };
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const abort = () => {
+      try { reader.abort(); } catch (_) {}
+      finish(reject, makeImportAbortError());
+    };
+
+    signal?.addEventListener('abort', abort, { once: true });
+    reader.onprogress = event => {
+      if (!event.lengthComputable) return;
+      onProgress?.(event.loaded, event.total);
+    };
+    reader.onerror = () => finish(reject, reader.error || new Error(`Could not read ${file.name}.`));
+    reader.onabort = () => finish(reject, makeImportAbortError());
+    reader.onload = () => finish(resolve, reader.result);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseCaptureFile(file, { signal, onReadProgress, onStage } = {}) {
+  onStage?.('Reading file');
+  const buffer = await readFileAsArrayBuffer(file, {
+    signal,
+    onProgress: onReadProgress
+  });
+  if (signal?.aborted) throw makeImportAbortError();
+
+  onStage?.('Parsing rows');
   const worker = getDataWorker();
   if (worker) {
     const id = ++dataWorkerRequestId;
     return new Promise((resolve, reject) => {
-      dataWorkerRequests.set(id, { resolve, reject });
+      const abort = () => {
+        if (!dataWorkerRequests.has(id)) return;
+        resetDataWorker(makeImportAbortError());
+      };
+      const cleanup = () => signal?.removeEventListener('abort', abort);
+      signal?.addEventListener('abort', abort, { once: true });
+      dataWorkerRequests.set(id, { resolve, reject, cleanup });
       worker.postMessage({
         id,
         buffer,
@@ -471,10 +612,29 @@ async function parseCaptureFile(file) {
     });
   }
 
+  if (signal?.aborted) throw makeImportAbortError();
   const text = new TextDecoder('utf-8').decode(buffer);
-  return file.name.toLowerCase().endsWith('.json')
+  const result = file.name.toLowerCase().endsWith('.json')
     ? parseCfxJsonDetailed(text, file.name)
     : parseCSVDetailed(text, file.name);
+  if (signal?.aborted) throw makeImportAbortError();
+  return result;
+}
+
+function cancelCaptureImport() {
+  const session = activeImportSession;
+  if (!session || session.cancelled) return false;
+  session.cancelled = true;
+  session.controller?.abort();
+  try { session.reader?.abort?.(); } catch (_) {}
+  resetDataWorker(makeImportAbortError());
+  updateImportProgress(session, {
+    fileIndex: Math.min(session.completedFiles, Math.max(0, session.totalFiles - 1)),
+    fileName: session.currentFileName || '',
+    stage: 'Cancelling import…',
+    fileProgress: 0
+  });
+  return true;
 }
 
 function yieldToMainThread() {
@@ -497,7 +657,8 @@ function makeUniqueDatasetName(originalName) {
   return candidate;
 }
 
-function resolveDuplicateDataset(fileName) {
+function resolveDuplicateDataset(fileName, signal = null) {
+  if (signal?.aborted) return Promise.resolve({ action: 'cancel', name: fileName, existingIndex: -1 });
   const existingIndex = (window.allDatasets || []).findIndex(dataset => dataset.name === fileName);
   if (existingIndex === -1) return Promise.resolve({ action: 'add', name: fileName, existingIndex: -1 });
 
@@ -530,12 +691,18 @@ function resolveDuplicateDataset(fileName) {
     document.body.appendChild(dialog);
 
     let action = 'cancel';
-    const closeDialog = nextAction => { action = nextAction; dialog.close(); };
+    const closeDialog = nextAction => {
+      action = nextAction;
+      if (dialog.open) dialog.close();
+    };
+    const abortDialog = () => closeDialog('cancel');
+    signal?.addEventListener('abort', abortDialog, { once: true });
     replaceButton.addEventListener('click', () => closeDialog('replace'));
     keepBothButton.addEventListener('click', () => closeDialog('rename'));
     cancelButton.addEventListener('click', () => closeDialog('cancel'));
     dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog('cancel'); });
     dialog.addEventListener('close', () => {
+      signal?.removeEventListener('abort', abortDialog);
       dialog.remove();
       previouslyFocused?.focus?.();
       resolve({ action, name: action === 'rename' ? makeUniqueDatasetName(fileName) : fileName, existingIndex });
@@ -550,25 +717,95 @@ async function handleFileUpload(e) {
   const files = Array.from(e?.target?.files || []);
   if (!files.length) return;
 
+  if (activeImportSession) {
+    window.notify?.('An import is already running. Cancel it before starting another.', 'warning');
+    return;
+  }
+
   const inputElement = e.target;
+  const session = {
+    totalFiles: files.length,
+    completedFiles: 0,
+    currentFileName: '',
+    cancelled: false,
+    controller: null,
+    reader: null
+  };
+  activeImportSession = session;
+  setImportUiBusy(true);
+  updateImportProgress(session, { fileIndex: 0, stage: 'Preparing import…', fileProgress: 0 });
+
   let successCount = 0;
   let errorCount = 0;
   let renamedCount = 0;
   let replacedCount = 0;
   let skippedCount = 0;
 
-  for (const file of files) {
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    if (session.cancelled) break;
+    const file = files[fileIndex];
+    session.currentFileName = file.name;
+    session.controller = new AbortController();
+    const signal = session.controller.signal;
+
     if (!SUPPORTED_CAPTURE_EXTENSION.test(file.name)) {
       window.notify?.(`Unsupported file type: ${file.name}`, 'warning');
       errorCount++;
+      session.completedFiles = fileIndex + 1;
+      updateImportProgress(session, {
+        fileIndex,
+        fileName: file.name,
+        stage: 'Unsupported file type',
+        fileProgress: 1
+      });
+      await yieldToMainThread();
       continue;
     }
+
     if (file.size >= LARGE_FILE_BYTES) {
-      window.notify?.(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB. It will be parsed in a background worker, but importing and cloning a capture this large can still use substantial memory.`, 'warning');
+      window.notify?.(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB. It will be processed one file at a time in a background worker, but a capture this large can still use substantial memory.`, 'warning');
     }
 
     try {
-      const parsed = await parseCaptureFile(file);
+      updateImportProgress(session, {
+        fileIndex,
+        fileName: file.name,
+        stage: 'Reading file',
+        fileProgress: 0
+      });
+
+      const parsed = await parseCaptureFile(file, {
+        signal,
+        onReadProgress(loaded, total) {
+          const fraction = total > 0 ? loaded / total : 0;
+          updateImportProgress(session, {
+            fileIndex,
+            fileName: file.name,
+            stage: `Reading file — ${(loaded / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB`,
+            fileProgress: Math.min(0.58, fraction * 0.58)
+          });
+        },
+        onStage(stage) {
+          if (stage === 'Parsing rows') {
+            updateImportProgress(session, {
+              fileIndex,
+              fileName: file.name,
+              stage: 'Parsing rows in background worker',
+              fileProgress: 0.68
+            });
+          }
+        }
+      });
+
+      if (signal.aborted || session.cancelled) throw makeImportAbortError();
+      updateImportProgress(session, {
+        fileIndex,
+        fileName: file.name,
+        stage: 'Validating metrics',
+        fileProgress: 0.84,
+        rowCount: parsed?.rows?.length ?? null
+      });
+
       (parsed.warnings || []).forEach(message => window.notify?.(message, 'warning'));
       if (parsed?.error === 'invalid_json') {
         throw new Error(`Invalid JSON: ${parsed.message}`);
@@ -577,36 +814,63 @@ async function handleFileUpload(e) {
         throw new Error('No valid data rows were found.');
       }
 
-      const duplicate = await resolveDuplicateDataset(file.name);
+      const duplicate = await resolveDuplicateDataset(file.name, signal);
+      if (signal.aborted || session.cancelled) throw makeImportAbortError();
       if (duplicate.action === 'cancel') {
         skippedCount++;
-        continue;
-      }
-
-      const datasetObj = {
-        id: duplicate.action === 'replace'
-          ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
-          : window.nextDatasetId++,
-        name: duplicate.name,
-        rows: parsed.rows,
-        source: parsed.metadata || null
-      };
-
-      if (duplicate.action === 'replace') {
-        const existing = window.allDatasets[duplicate.existingIndex];
-        if (existing?.color) datasetObj.color = existing.color;
-        window.allDatasets[duplicate.existingIndex] = datasetObj;
-        replacedCount++;
       } else {
-        window.allDatasets.push(datasetObj);
-        if (duplicate.action === 'rename') renamedCount++;
+        updateImportProgress(session, {
+          fileIndex,
+          fileName: file.name,
+          stage: 'Finalizing dataset',
+          fileProgress: 0.94,
+          rowCount: parsed.rows.length
+        });
+
+        const datasetObj = {
+          id: duplicate.action === 'replace'
+            ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
+            : window.nextDatasetId++,
+          name: duplicate.name,
+          rows: parsed.rows,
+          source: parsed.metadata || null
+        };
+
+        if (duplicate.action === 'replace') {
+          const existing = window.allDatasets[duplicate.existingIndex];
+          if (existing?.color) datasetObj.color = existing.color;
+          window.allDatasets[duplicate.existingIndex] = datasetObj;
+          replacedCount++;
+        } else {
+          window.allDatasets.push(datasetObj);
+          if (duplicate.action === 'rename') renamedCount++;
+        }
+        successCount++;
+
+        // One controlled refresh per completed file keeps the UI responsive
+        // without repeatedly rebuilding controls during parsing.
+        refreshDatasetLists();
       }
-      successCount++;
     } catch (error) {
+      if (error?.name === 'AbortError' || session.cancelled) {
+        session.cancelled = true;
+        break;
+      }
       console.error(`Error parsing ${file.name}:`, error);
       window.notify?.(`Error parsing ${file.name}: ${error.message}`, 'error');
       errorCount++;
+    } finally {
+      session.controller = null;
+      session.reader = null;
     }
+
+    session.completedFiles = fileIndex + 1;
+    updateImportProgress(session, {
+      fileIndex,
+      fileName: file.name,
+      stage: 'File complete',
+      fileProgress: 1
+    });
     await yieldToMainThread();
   }
 
@@ -615,14 +879,24 @@ async function handleFileUpload(e) {
     window.resetStatsPanel?.();
     window.resetReliabilityPanel?.();
   }
-  refreshDatasetLists();
+  if (!successCount) refreshDatasetLists();
 
-  const summaryParts = [`Loaded ${successCount} file(s).`];
+  const summaryParts = [];
+  if (successCount) summaryParts.push(`Loaded ${successCount} file(s).`);
   if (renamedCount) summaryParts.push(`Renamed ${renamedCount} duplicate(s).`);
   if (replacedCount) summaryParts.push(`Replaced ${replacedCount} existing dataset(s).`);
   if (skippedCount) summaryParts.push(`Skipped ${skippedCount} duplicate(s).`);
   if (errorCount) summaryParts.push(`${errorCount} file(s) had errors.`);
-  window.notify?.(summaryParts.join(' '), errorCount || skippedCount ? 'warning' : 'success');
+
+  const wasCancelled = session.cancelled;
+  const summary = wasCancelled
+    ? `Import cancelled. ${successCount} completed file(s) were kept.`
+    : (summaryParts.join(' ') || 'No files were imported.');
+
+  activeImportSession = null;
+  setImportUiBusy(false);
+  finishImportProgress(session, summary, { cancelled: wasCancelled });
+  window.notify?.(summary, wasCancelled || errorCount || skippedCount ? 'warning' : 'success');
 
   if (inputElement && 'value' in inputElement) inputElement.value = '';
 }
@@ -1114,6 +1388,7 @@ window.parseCfxJson = parseCfxJson;
 window.parseCaptureFile = parseCaptureFile;
 window.normaliseRow = normaliseRow;
 window.handleFileUpload = handleFileUpload;
+window.cancelCaptureImport = cancelCaptureImport;
 window.refreshDatasetLists = refreshDatasetLists;
 window.getDatasetIndexById = getDatasetIndexById;
 window.updateMetricDropdowns = updateMetricDropdowns;
