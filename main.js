@@ -315,6 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupStatsSidebarControls();
   setupVizChartTypeControls();
   setupVisualizationResultMode();
+  window.setupAnalysisBoardCustomization?.();
 
   const updateReliabilityBtn = document.getElementById('updateReliabilityBtn');
   const reliabilityMetricSelect = document.getElementById('reliabilityMetricSelect');

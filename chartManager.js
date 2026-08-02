@@ -1074,24 +1074,190 @@ function updateChartStatusLine() {
 let visualizationResultMode = 'single';
 let analysisBoardCharts = [];
 let analysisBoardDatasetIndices = [];
+let analysisBoardConfig = null;
+let analysisBoardRebuildTimer = null;
+let analysisBoardCardCounter = 0;
 window.analysisBoardReady = false;
 
-function destroyAnalysisBoard() {
+const ANALYSIS_BOARD_STORAGE_KEY = 'fta-analysis-board-config-v1';
+const ANALYSIS_BOARD_MAX_CARDS = 6;
+const ANALYSIS_BOARD_CARD_TYPES = Object.freeze({
+  timeline: { label: 'Timeline', description: 'Sampled values over the capture.' },
+  percentile: { label: 'Percentile curve', description: 'Full distribution from the lowest to highest values.' },
+  histogram: { label: 'Histogram', description: 'Share of valid samples in shared value ranges.' },
+  boxplot: { label: 'Box plot', description: 'Median, spread, whiskers, and outliers.' },
+  summary: { label: 'Summary bars', description: 'Average and worst-tail means.' }
+});
+
+const ANALYSIS_BOARD_FALLBACK_METRICS = [
+  'FrameTime', 'RenderedFPS', 'DisplayedFrameTime', 'DisplayedFPS',
+  'MsBetweenPresents', 'MsBetweenDisplayChange', 'MsGPUBusy', 'MsUntilDisplayed'
+];
+
+const ANALYSIS_BOARD_EXCLUDED_METRICS = new Set([
+  'Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD',
+  'Rendered_FTSD', 'Displayed_FTSD',
+  'Rendered_Coefficient_of_Variation', 'Displayed_Coefficient_of_Variation',
+  'Rendered_RMSSD', 'Displayed_RMSSD',
+  'Rendered_Stepwise_Relative_SD', 'Displayed_Stepwise_Relative_SD',
+  'Skewness', 'Kurtosis', 'Nonparametric_Skew'
+]);
+
+const ANALYSIS_BOARD_PRESET_TITLES = Object.freeze({
+  performance: 'Performance overview',
+  consistency: 'Frame-time consistency',
+  renderedDisplayed: 'Rendered vs displayed'
+});
+
+const ANALYSIS_BOARD_PRESETS = Object.freeze({
+  performance: [
+    { id: 'performance-timeline', type: 'timeline', metric: 'FrameTime' },
+    { id: 'performance-percentile', type: 'percentile', metric: 'RenderedFPS' },
+    { id: 'performance-box', type: 'boxplot', metric: 'RenderedFPS' },
+    { id: 'performance-summary', type: 'summary', metric: 'RenderedFPS' }
+  ],
+  consistency: [
+    { id: 'consistency-timeline', type: 'timeline', metric: 'FrameTime' },
+    { id: 'consistency-percentile', type: 'percentile', metric: 'FrameTime' },
+    { id: 'consistency-histogram', type: 'histogram', metric: 'FrameTime' },
+    { id: 'consistency-box', type: 'boxplot', metric: 'FrameTime' }
+  ],
+  renderedDisplayed: [
+    { id: 'comparison-rendered-timeline', type: 'timeline', metric: 'RenderedFPS' },
+    { id: 'comparison-displayed-timeline', type: 'timeline', metric: 'DisplayedFPS' },
+    { id: 'comparison-rendered-percentile', type: 'percentile', metric: 'RenderedFPS' },
+    { id: 'comparison-displayed-percentile', type: 'percentile', metric: 'DisplayedFPS' },
+    { id: 'comparison-rendered-box', type: 'boxplot', metric: 'RenderedFPS' },
+    { id: 'comparison-displayed-box', type: 'boxplot', metric: 'DisplayedFPS' }
+  ]
+});
+
+function cloneBoardCards(cards) {
+  return (cards || []).map(card => ({ ...card }));
+}
+
+function createBoardCardId() {
+  analysisBoardCardCounter += 1;
+  return `custom-${Date.now().toString(36)}-${analysisBoardCardCounter.toString(36)}`;
+}
+
+function normalizeBoardCards(cards) {
+  const source = Array.isArray(cards) && cards.length
+    ? cards
+    : ANALYSIS_BOARD_PRESETS.performance;
+  const seen = new Set();
+  const normalized = [];
+  source.slice(0, ANALYSIS_BOARD_MAX_CARDS).forEach((card, index) => {
+    const type = Object.prototype.hasOwnProperty.call(ANALYSIS_BOARD_CARD_TYPES, card?.type)
+      ? card.type
+      : 'timeline';
+    const metric = typeof card?.metric === 'string' && card.metric.trim()
+      ? card.metric.trim()
+      : 'RenderedFPS';
+    let id = String(card?.id || `card-${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '-');
+    if (!id || seen.has(id)) id = createBoardCardId();
+    seen.add(id);
+    normalized.push({ id, type, metric });
+  });
+  return normalized.length ? normalized : cloneBoardCards(ANALYSIS_BOARD_PRESETS.performance);
+}
+
+function cardsMatchPreset(cards, presetCards) {
+  if (!Array.isArray(cards) || cards.length !== presetCards.length) return false;
+  return cards.every((card, index) =>
+    card.type === presetCards[index].type && card.metric === presetCards[index].metric
+  );
+}
+
+function detectAnalysisBoardPreset(cards = analysisBoardConfig?.cards) {
+  for (const [name, presetCards] of Object.entries(ANALYSIS_BOARD_PRESETS)) {
+    if (cardsMatchPreset(cards, presetCards)) return name;
+  }
+  return 'custom';
+}
+
+function loadAnalysisBoardConfig() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ANALYSIS_BOARD_STORAGE_KEY) || 'null');
+    if (parsed && Array.isArray(parsed.cards)) {
+      return { cards: normalizeBoardCards(parsed.cards) };
+    }
+  } catch (error) {
+    console.warn('Could not restore analysis-board configuration:', error);
+  }
+  return { cards: cloneBoardCards(ANALYSIS_BOARD_PRESETS.performance) };
+}
+
+function saveAnalysisBoardConfig() {
+  if (!analysisBoardConfig) return;
+  try {
+    localStorage.setItem(ANALYSIS_BOARD_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      cards: analysisBoardConfig.cards.map(({ id, type, metric }) => ({ id, type, metric }))
+    }));
+  } catch (error) {
+    console.warn('Could not save analysis-board configuration:', error);
+  }
+}
+
+function ensureAnalysisBoardConfig() {
+  if (!analysisBoardConfig) analysisBoardConfig = loadAnalysisBoardConfig();
+  analysisBoardConfig.cards = normalizeBoardCards(analysisBoardConfig.cards);
+  return analysisBoardConfig;
+}
+
+function getBoardMetricChoices() {
+  const options = [];
+  const seen = new Set();
+  const add = (value, label) => {
+    if (!value || seen.has(value) || ANALYSIS_BOARD_EXCLUDED_METRICS.has(value)) return;
+    seen.add(value);
+    options.push({ value, label: label || window.getMetricDisplayName?.(value) || value });
+  };
+
+  document.querySelectorAll('#metricSelect option').forEach(option => {
+    add(option.value, option.textContent?.trim());
+  });
+  ANALYSIS_BOARD_FALLBACK_METRICS.forEach(metric => add(metric));
+  ensureAnalysisBoardConfig().cards.forEach(card => add(card.metric));
+  return options;
+}
+
+function updateAnalysisBoardPresetControl() {
+  const presetSelect = document.getElementById('analysisBoardPresetSelect');
+  if (presetSelect) presetSelect.value = detectAnalysisBoardPreset();
+  const addButton = document.getElementById('analysisBoardAddCardBtn');
+  if (addButton) {
+    const atLimit = ensureAnalysisBoardConfig().cards.length >= ANALYSIS_BOARD_MAX_CARDS;
+    addButton.disabled = atLimit;
+    addButton.title = atLimit ? `Maximum ${ANALYSIS_BOARD_MAX_CARDS} cards` : 'Add another chart card';
+  }
+}
+
+function destroyAnalysisBoardCharts() {
   analysisBoardCharts.forEach(chart => {
     try { chart?.destroy?.(); } catch (error) { console.warn('Board chart cleanup failed:', error); }
   });
   analysisBoardCharts = [];
+}
+
+function destroyAnalysisBoard() {
+  destroyAnalysisBoardCharts();
   analysisBoardDatasetIndices = [];
   window.analysisBoardReady = false;
+  const grid = document.getElementById('analysisBoardGrid');
   const legend = document.getElementById('analysisBoardLegend');
   const body = document.getElementById('analysisBoardStatsBody');
   const status = document.getElementById('analysisBoardStatus');
   const meta = document.getElementById('analysisBoardExportMeta');
+  const caption = document.getElementById('analysisBoardStatsCaption');
   const exportButton = document.getElementById('exportAnalysisBoardPngBtn');
+  if (grid) grid.innerHTML = '';
   if (legend) legend.innerHTML = '';
   if (body) body.innerHTML = '';
   if (status) status.textContent = '';
-  if (meta) meta.textContent = 'Rendered frame-time and FPS overview';
+  if (meta) meta.textContent = 'Custom multi-chart performance report';
+  if (caption) caption.textContent = 'Board summary statistics';
   if (exportButton) exportButton.disabled = true;
 }
 
@@ -1117,9 +1283,10 @@ function syncVisualizationResultUi(mode = visualizationResultMode) {
   heightControl?.classList.toggle('hidden', boardMode);
   if (hint) {
     hint.textContent = boardMode
-      ? 'The board uses the selected datasets and keeps one shared color legend across all four views.'
+      ? 'Choose a preset or customize each card. Card changes rebuild the board using the selected datasets.'
       : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.';
   }
+  updateAnalysisBoardPresetControl();
 }
 
 function setVisualizationResultMode(mode) {
@@ -1182,14 +1349,129 @@ function makeBoardOptions(scales, extra = {}) {
   };
 }
 
-function createAnalysisBoardChart(canvasId, config) {
-  const canvas = document.getElementById(canvasId);
+function createAnalysisBoardChart(canvas, config) {
   if (!canvas) return null;
   const existing = window.Chart?.getChart?.(canvas);
   existing?.destroy?.();
   const chart = new Chart(canvas.getContext('2d'), config);
   analysisBoardCharts.push(chart);
   return chart;
+}
+
+function getBoardCardText(card) {
+  const metricLabel = window.getMetricDisplayName?.(card.metric) || card.metric;
+  const type = ANALYSIS_BOARD_CARD_TYPES[card.type] || ANALYSIS_BOARD_CARD_TYPES.timeline;
+  const titles = {
+    timeline: `${metricLabel} timeline`,
+    percentile: `${metricLabel} percentiles`,
+    histogram: `${metricLabel} histogram`,
+    boxplot: `${metricLabel} distribution`,
+    summary: `${metricLabel} summary`
+  };
+  return { title: titles[card.type] || metricLabel, description: type.description, metricLabel };
+}
+
+function makeBoardSelect(className, label, value, choices) {
+  const select = document.createElement('select');
+  select.className = className;
+  select.setAttribute('aria-label', label);
+  choices.forEach(choice => {
+    const option = document.createElement('option');
+    option.value = choice.value;
+    option.textContent = choice.label;
+    select.appendChild(option);
+  });
+  select.value = value;
+  return select;
+}
+
+function renderAnalysisBoardCardShells() {
+  const grid = document.getElementById('analysisBoardGrid');
+  if (!grid) return new Map();
+  grid.innerHTML = '';
+  const cards = ensureAnalysisBoardConfig().cards;
+  const metricChoices = getBoardMetricChoices();
+  const typeChoices = Object.entries(ANALYSIS_BOARD_CARD_TYPES)
+    .map(([value, def]) => ({ value, label: def.label }));
+  const elements = new Map();
+
+  cards.forEach((card, index) => {
+    const text = getBoardCardText(card);
+    const article = document.createElement('article');
+    article.className = 'analysis-board-card';
+    article.dataset.cardId = card.id;
+
+    const header = document.createElement('div');
+    header.className = 'analysis-board-card-head';
+    const copy = document.createElement('div');
+    copy.className = 'analysis-board-card-copy';
+    const heading = document.createElement('h3');
+    heading.textContent = text.title;
+    const description = document.createElement('p');
+    description.textContent = text.description;
+    copy.append(heading, description);
+
+    const controls = document.createElement('div');
+    controls.className = 'analysis-board-card-controls';
+    controls.setAttribute('data-export-exclude', 'true');
+    const typeSelect = makeBoardSelect(
+      'analysis-board-card-select analysis-board-card-type',
+      `Chart type for card ${index + 1}`,
+      card.type,
+      typeChoices
+    );
+    typeSelect.dataset.cardId = card.id;
+    const metricSelect = makeBoardSelect(
+      'analysis-board-card-select analysis-board-card-metric',
+      `Metric for card ${index + 1}`,
+      card.metric,
+      metricChoices
+    );
+    metricSelect.dataset.cardId = card.id;
+
+    const makeAction = (action, textContent, ariaLabel, disabled = false) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'analysis-board-card-action';
+      button.dataset.cardAction = action;
+      button.dataset.cardId = card.id;
+      button.textContent = textContent;
+      button.setAttribute('aria-label', ariaLabel);
+      button.disabled = disabled;
+      return button;
+    };
+    controls.append(
+      typeSelect,
+      metricSelect,
+      makeAction('up', '↑', `Move card ${index + 1} up`, index === 0),
+      makeAction('down', '↓', `Move card ${index + 1} down`, index === cards.length - 1),
+      makeAction('remove', '×', `Remove card ${index + 1}`, cards.length <= 1)
+    );
+    header.append(copy, controls);
+
+    const canvasWrap = document.createElement('div');
+    canvasWrap.className = 'analysis-board-canvas-wrap';
+    const canvas = document.createElement('canvas');
+    canvas.id = `analysisBoardChart-${card.id}`;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', text.title);
+    const empty = document.createElement('p');
+    empty.className = 'analysis-board-card-empty hidden';
+    empty.setAttribute('aria-live', 'polite');
+    canvasWrap.append(canvas, empty);
+    article.append(header, canvasWrap);
+    grid.appendChild(article);
+    elements.set(card.id, { article, heading, description, canvas, empty });
+  });
+  updateAnalysisBoardPresetControl();
+  return elements;
+}
+
+function setBoardCardEmpty(elements, message) {
+  if (!elements) return;
+  elements.canvas.classList.add('hidden');
+  elements.empty.textContent = message;
+  elements.empty.classList.remove('hidden');
 }
 
 function buildBoardLegend(indices) {
@@ -1212,10 +1494,18 @@ function buildBoardLegend(indices) {
   });
 }
 
-function buildBoardStatsTable(entries) {
+function isBoardFpsMetric(metric) {
+  return metric === 'FPS' || metric === 'RenderedFPS' || metric === 'DisplayedFPS';
+}
+
+function buildBoardStatsTable(entries, metric) {
   const body = document.getElementById('analysisBoardStatsBody');
+  const caption = document.getElementById('analysisBoardStatsCaption');
   if (!body) return;
   body.innerHTML = '';
+  const metricLabel = window.getMetricDisplayName?.(metric) || metric;
+  if (caption) caption.textContent = `${metricLabel} summary statistics`;
+
   entries.forEach(entry => {
     const row = document.createElement('tr');
     const nameCell = document.createElement('th');
@@ -1231,11 +1521,11 @@ function buildBoardStatsTable(entries) {
     row.appendChild(nameCell);
 
     const values = [
-      window.formatStatValue?.('RenderedFPS', 'avg', entry.stats.avg) ?? entry.stats.avg?.toFixed?.(2),
-      window.formatStatValue?.('RenderedFPS', 'low1', entry.stats.low1) ?? entry.stats.low1?.toFixed?.(2),
-      window.formatStatValue?.('RenderedFPS', 'low01', entry.stats.low01) ?? entry.stats.low01?.toFixed?.(2),
-      window.formatStatValue?.('RenderedFPS', 'stdev', entry.stats.stdev) ?? entry.stats.stdev?.toFixed?.(2),
-      entry.fpsValues.length.toLocaleString()
+      window.formatStatValue?.(metric, 'avg', entry.stats.avg) ?? entry.stats.avg?.toFixed?.(2),
+      window.formatStatValue?.(metric, 'low1', entry.stats.low1) ?? entry.stats.low1?.toFixed?.(2),
+      window.formatStatValue?.(metric, 'low01', entry.stats.low01) ?? entry.stats.low01?.toFixed?.(2),
+      window.formatStatValue?.(metric, 'stdev', entry.stats.stdev) ?? entry.stats.stdev?.toFixed?.(2),
+      entry.values.length.toLocaleString()
     ];
     values.forEach(value => {
       const cell = document.createElement('td');
@@ -1246,8 +1536,177 @@ function buildBoardStatsTable(entries) {
   });
 }
 
+function buildBoardCardChart(card, elements, entries) {
+  if (!entries.length) {
+    setBoardCardEmpty(elements, `No usable ${getBoardCardText(card).metricLabel} values in the selected datasets.`);
+    return false;
+  }
+  const metricLabel = getBoardCardText(card).metricLabel;
+  const yLabel = getYAxisLabel(card.metric);
+
+  if (card.type === 'timeline') {
+    const useElapsedTime = [
+      'FrameTime', 'DisplayedFrameTime', 'MsBetweenPresents', 'MsBetweenDisplayChange'
+    ].includes(card.metric);
+    const datasets = entries.map(entry => {
+      const indicesToPlot = sampleIndices(entry.values.length, 2200);
+      let points;
+      if (useElapsedTime) {
+        points = [];
+        let elapsedMs = 0;
+        let plotCursor = 0;
+        for (let index = 0; index < entry.values.length; index++) {
+          elapsedMs += entry.values[index];
+          if (plotCursor < indicesToPlot.length && index === indicesToPlot[plotCursor]) {
+            points.push({ x: elapsedMs / 1000, y: entry.values[index] });
+            plotCursor += 1;
+          }
+        }
+      } else {
+        points = indicesToPlot.map(index => ({ x: index + 1, y: entry.values[index] }));
+      }
+      return {
+        label: entry.label,
+        data: points,
+        borderColor: entry.color,
+        backgroundColor: entry.color,
+        pointRadius: 0,
+        spanGaps: true,
+        showLine: true
+      };
+    });
+    createAnalysisBoardChart(elements.canvas, {
+      type: 'line',
+      data: { datasets },
+      options: makeBoardOptions({
+        x: makeBoardLinearAxis(useElapsedTime ? 'Elapsed time (s)' : 'Valid sample #', { grid: false }),
+        y: makeBoardLinearAxis(yLabel)
+      })
+    });
+    return true;
+  }
+
+  if (card.type === 'percentile') {
+    const datasets = entries.map(entry => {
+      const sorted = Array.from(entry.values).sort((a, b) => a - b);
+      const plotIndices = sampleIndices(sorted.length, 1200);
+      return {
+        label: entry.label,
+        data: plotIndices.map(index => ({
+          x: sorted.length <= 1 ? 100 : index * 100 / (sorted.length - 1),
+          y: sorted[index]
+        })),
+        borderColor: entry.color,
+        backgroundColor: entry.color,
+        pointRadius: 0,
+        showLine: true
+      };
+    });
+    const xAxis = makeBoardLinearAxis('Percentile', { grid: false });
+    xAxis.min = 0;
+    xAxis.max = 100;
+    xAxis.ticks = { ...xAxis.ticks, callback: value => `${value}%` };
+    createAnalysisBoardChart(elements.canvas, {
+      type: 'line',
+      data: { datasets },
+      options: makeBoardOptions({ x: xAxis, y: makeBoardLinearAxis(yLabel) })
+    });
+    return true;
+  }
+
+  if (card.type === 'histogram') {
+    const series = entries.map(entry => Array.from(entry.values));
+    const shared = computeSharedHistogramEdges(series) || undefined;
+    const histograms = series.map(values => buildHistogram(values, shared));
+    const labels = histograms[0]?.labels || [];
+    createAnalysisBoardChart(elements.canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: entries.map((entry, index) => ({
+          label: entry.label,
+          data: histogramCountsForDisplay(histograms[index].counts, true),
+          backgroundColor: hexToRgba(entry.color, 0.42),
+          borderColor: entry.color,
+          borderWidth: 1,
+          barPercentage: 1,
+          categoryPercentage: 1
+        }))
+      },
+      options: makeBoardOptions({
+        x: {
+          ...makeBoardCategoryAxis(metricLabel),
+          ticks: { color: getChartThemeColors().text, autoSkip: true, maxTicksLimit: 8, maxRotation: 0 }
+        },
+        y: makeBoardLinearAxis('% of valid samples', { beginAtZero: true })
+      }, { parsing: true })
+    });
+    return true;
+  }
+
+  if (card.type === 'boxplot') {
+    try {
+      createAnalysisBoardChart(elements.canvas, {
+        type: 'boxplot',
+        data: {
+          labels: entries.map(entry => entry.label),
+          datasets: [{
+            label: metricLabel,
+            data: entries.map(entry => sampleSeries(entry.values, MAX_DISTRIBUTION_POINTS)),
+            backgroundColor: entries.map(entry => hexToRgba(entry.color, 0.45)),
+            borderColor: entries.map(entry => entry.color),
+            borderWidth: 1.5
+          }]
+        },
+        options: makeBoardOptions({
+          x: makeBoardLinearAxis(yLabel),
+          y: makeBoardCategoryAxis('Dataset')
+        }, { indexAxis: 'y', parsing: true })
+      });
+      return true;
+    } catch (error) {
+      console.error('Analysis-board box plot failed:', error);
+      setBoardCardEmpty(elements, 'Box plot unavailable because the chart extension failed to load.');
+      return false;
+    }
+  }
+
+  if (card.type === 'summary') {
+    const labels = ['Average', 'Worst 1% mean', 'Worst 0.1% mean'];
+    createAnalysisBoardChart(elements.canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: entries.map(entry => ({
+          label: entry.label,
+          data: [entry.stats.avg, entry.stats.low1, entry.stats.low01],
+          backgroundColor: hexToRgba(entry.color, 0.78),
+          borderColor: entry.color,
+          borderWidth: 1
+        }))
+      },
+      options: makeBoardOptions({
+        x: makeBoardLinearAxis(yLabel, { beginAtZero: isBoardFpsMetric(card.metric) }),
+        y: makeBoardCategoryAxis('Statistic')
+      }, { indexAxis: 'y', parsing: true })
+    });
+    return true;
+  }
+
+  setBoardCardEmpty(elements, 'Unsupported card type.');
+  return false;
+}
+
+function scheduleAnalysisBoardRebuild() {
+  clearTimeout(analysisBoardRebuildTimer);
+  if (!window.analysisBoardReady || !analysisBoardDatasetIndices.length) return;
+  analysisBoardRebuildTimer = setTimeout(() => {
+    buildAnalysisBoard(analysisBoardDatasetIndices, { silent: true });
+  }, 70);
+}
+
 function buildAnalysisBoard(indices, { silent = false } = {}) {
-  destroyAnalysisBoard();
+  destroyAnalysisBoardCharts();
   if (window.mainChart) {
     window.mainChart.destroy();
     window.mainChart = null;
@@ -1258,145 +1717,71 @@ function buildAnalysisBoard(indices, { silent = false } = {}) {
   setResetZoomEnabled(false);
   visualizationResultMode = 'board';
   window.assignDatasetColors?.();
+  ensureAnalysisBoardConfig();
 
-  const entries = indices.map(index => {
+  const validIndices = indices.filter(index => window.allDatasets?.[index]);
+  if (!validIndices.length) {
+    window.analysisBoardReady = false;
+    syncVisualizationResultUi('board');
+    if (!silent) window.notify?.('Select at least one dataset before building the analysis board.', 'warning');
+    return false;
+  }
+  analysisBoardDatasetIndices = validIndices.slice();
+  buildBoardLegend(analysisBoardDatasetIndices);
+  const cardElements = renderAnalysisBoardCardShells();
+  const seriesCache = new Map();
+  const getSeries = (index, metric) => {
+    const key = `${index}\u0000${metric}`;
+    if (!seriesCache.has(key)) {
+      seriesCache.set(key, getMetricSeries(window.allDatasets[index], metric));
+    }
+    return seriesCache.get(key);
+  };
+  const getEntries = metric => validIndices.map(index => {
     const dataset = window.allDatasets[index];
-    const fpsValues = getMetricSeries(dataset, 'RenderedFPS');
-    const frameValues = typeof window.collectMetricValues === 'function'
-      ? window.collectMetricValues(dataset, 'FrameTime')
-      : [];
-    if (!fpsValues.length || !frameValues.length) return null;
+    const values = getSeries(index, metric);
+    if (!values?.length) return null;
     return {
       index,
       dataset,
       label: getDatasetLabel(dataset),
       color: dataset.color || getBenchmarkColor(index),
-      fpsValues,
-      frameValues,
-      stats: window.calculateStatistics(fpsValues, 'RenderedFPS')
+      values,
+      stats: window.calculateStatistics(values, metric)
     };
   }).filter(Boolean);
 
-  if (!entries.length) {
+  let builtCards = 0;
+  ensureAnalysisBoardConfig().cards.forEach(card => {
+    const elements = cardElements.get(card.id);
+    const entries = getEntries(card.metric);
+    if (buildBoardCardChart(card, elements, entries)) builtCards += 1;
+  });
+
+  if (!builtCards) {
+    window.analysisBoardReady = false;
     syncVisualizationResultUi('board');
-    if (!silent) window.notify?.('The selected datasets do not contain usable rendered timing data.', 'warning');
+    if (!silent) window.notify?.('None of the board cards have usable values for the selected datasets.', 'warning');
     return false;
   }
 
-  analysisBoardDatasetIndices = entries.map(entry => entry.index);
-  buildBoardLegend(analysisBoardDatasetIndices);
+  const summaryCard = ensureAnalysisBoardConfig().cards.find(card => card.type === 'summary');
+  const statsMetric = summaryCard?.metric || ensureAnalysisBoardConfig().cards[0]?.metric || 'RenderedFPS';
+  const statsEntries = getEntries(statsMetric);
+  buildBoardStatsTable(statsEntries, statsMetric);
 
-  const frameDatasets = entries.map(entry => {
-    const indicesToPlot = sampleIndices(entry.frameValues.length, 2200);
-    const points = [];
-    let elapsedMs = 0;
-    let plotCursor = 0;
-    for (let index = 0; index < entry.frameValues.length; index++) {
-      elapsedMs += entry.frameValues[index];
-      if (plotCursor < indicesToPlot.length && index === indicesToPlot[plotCursor]) {
-        points.push({ x: elapsedMs / 1000, y: entry.frameValues[index] });
-        plotCursor++;
-      }
-    }
-    return {
-      label: entry.label,
-      data: points,
-      borderColor: entry.color,
-      backgroundColor: entry.color,
-      pointRadius: 0,
-      spanGaps: true,
-      showLine: true
-    };
-  });
-  createAnalysisBoardChart('analysisFrameTimeChart', {
-    type: 'line',
-    data: { datasets: frameDatasets },
-    options: makeBoardOptions({
-      x: makeBoardLinearAxis('Elapsed time (s)', { grid: false }),
-      y: makeBoardLinearAxis('Rendered frame time (ms)')
-    })
-  });
-
-  const percentileDatasets = entries.map(entry => {
-    const sorted = entry.fpsValues.slice().sort((a, b) => a - b);
-    const plotIndices = sampleIndices(sorted.length, 1200);
-    return {
-      label: entry.label,
-      data: plotIndices.map(index => ({
-        x: sorted.length <= 1 ? 100 : index * 100 / (sorted.length - 1),
-        y: sorted[index]
-      })),
-      borderColor: entry.color,
-      backgroundColor: entry.color,
-      pointRadius: 0,
-      showLine: true
-    };
-  });
-  createAnalysisBoardChart('analysisPercentileChart', {
-    type: 'line',
-    data: { datasets: percentileDatasets },
-    options: makeBoardOptions({
-      x: { ...makeBoardLinearAxis('Percentile', { grid: false }), min: 0, max: 100, ticks: { ...makeBoardLinearAxis('').ticks, callback: value => `${value}%` } },
-      y: makeBoardLinearAxis('Rendered FPS')
-    })
-  });
-
-  try {
-    createAnalysisBoardChart('analysisBoxChart', {
-      type: 'boxplot',
-      data: {
-        labels: entries.map(entry => entry.label),
-        datasets: [{
-          label: 'Rendered FPS',
-          data: entries.map(entry => sampleSeries(entry.fpsValues, MAX_DISTRIBUTION_POINTS)),
-          backgroundColor: entries.map(entry => hexToRgba(entry.color, 0.45)),
-          borderColor: entries.map(entry => entry.color),
-          borderWidth: 1.5
-        }]
-      },
-      options: makeBoardOptions({
-        x: makeBoardLinearAxis('Rendered FPS'),
-        y: makeBoardCategoryAxis('Dataset')
-      }, { indexAxis: 'y', parsing: true })
-    });
-  } catch (error) {
-    console.error('Analysis-board box plot failed:', error);
-    const canvas = document.getElementById('analysisBoxChart');
-    canvas?.setAttribute('aria-label', 'Box plot unavailable because the chart extension failed to load.');
-  }
-
-  const summaryLabels = ['Average FPS', 'Worst 1% mean', 'Worst 0.1% mean'];
-  createAnalysisBoardChart('analysisSummaryChart', {
-    type: 'bar',
-    data: {
-      labels: summaryLabels,
-      datasets: entries.map(entry => ({
-        label: entry.label,
-        data: [entry.stats.avg, entry.stats.low1, entry.stats.low01],
-        backgroundColor: hexToRgba(entry.color, 0.78),
-        borderColor: entry.color,
-        borderWidth: 1
-      }))
-    },
-    options: makeBoardOptions({
-      x: makeBoardLinearAxis('Rendered FPS', { beginAtZero: true }),
-      y: makeBoardCategoryAxis('Statistic')
-    }, { indexAxis: 'y', parsing: true })
-  });
-
-  buildBoardStatsTable(entries);
-  const frames = entries.reduce((sum, entry) => sum + entry.fpsValues.length, 0);
+  const samples = statsEntries.reduce((sum, entry) => sum + entry.values.length, 0);
   const status = document.getElementById('analysisBoardStatus');
   const meta = document.getElementById('analysisBoardExportMeta');
   if (status) {
-    status.textContent = `${entries.length} dataset${entries.length === 1 ? '' : 's'} · ${frames.toLocaleString()} valid rendered frames`;
+    status.textContent = `${validIndices.length} dataset${validIndices.length === 1 ? '' : 's'} · ${builtCards} card${builtCards === 1 ? '' : 's'}`;
   }
   if (meta) {
-    meta.textContent = `Rendered frame-time and FPS overview · ${entries.length} dataset${entries.length === 1 ? '' : 's'}`;
+    meta.textContent = `${builtCards}-card analysis · ${validIndices.length} dataset${validIndices.length === 1 ? '' : 's'} · ${samples.toLocaleString()} summary samples`;
   }
 
   window.currentChartType = 'analysisboard';
-  window.currentChartMetric = 'RenderedFPS';
+  window.currentChartMetric = statsMetric;
   window.analysisBoardReady = true;
   const clearButton = document.getElementById('clearChartBtn');
   if (clearButton) clearButton.disabled = false;
@@ -1463,6 +1848,113 @@ function refreshDatasetDisplayNames() {
     buildAnalysisBoard(analysisBoardDatasetIndices, { silent: true });
   }
 }
+
+function applyAnalysisBoardPreset(name) {
+  const preset = ANALYSIS_BOARD_PRESETS[name];
+  if (!preset) return;
+  analysisBoardConfig = { cards: cloneBoardCards(preset) };
+  saveAnalysisBoardConfig();
+
+  const title = ANALYSIS_BOARD_PRESET_TITLES[name];
+  const titleInput = document.getElementById('analysisBoardTitleInput');
+  const heading = document.getElementById('analysisBoardHeading');
+  if (title) {
+    if (titleInput) titleInput.value = title;
+    if (heading) heading.textContent = title;
+    try { localStorage.setItem('fta-analysis-board-title', title); } catch (error) { /* storage unavailable */ }
+  }
+
+  updateAnalysisBoardPresetControl();
+  if (window.analysisBoardReady) scheduleAnalysisBoardRebuild();
+}
+
+function addAnalysisBoardCard() {
+  const config = ensureAnalysisBoardConfig();
+  if (config.cards.length >= ANALYSIS_BOARD_MAX_CARDS) {
+    window.notify?.(`The analysis board supports up to ${ANALYSIS_BOARD_MAX_CARDS} cards.`, 'warning');
+    return;
+  }
+  const last = config.cards[config.cards.length - 1];
+  config.cards.push({
+    id: createBoardCardId(),
+    type: last?.type || 'timeline',
+    metric: last?.metric || 'RenderedFPS'
+  });
+  saveAnalysisBoardConfig();
+  updateAnalysisBoardPresetControl();
+  if (window.analysisBoardReady) scheduleAnalysisBoardRebuild();
+}
+
+function updateAnalysisBoardCard(cardId, patch) {
+  const card = ensureAnalysisBoardConfig().cards.find(item => item.id === cardId);
+  if (!card) return;
+  Object.assign(card, patch);
+  saveAnalysisBoardConfig();
+  updateAnalysisBoardPresetControl();
+  scheduleAnalysisBoardRebuild();
+}
+
+function moveAnalysisBoardCard(cardId, direction) {
+  const cards = ensureAnalysisBoardConfig().cards;
+  const index = cards.findIndex(card => card.id === cardId);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= cards.length) return;
+  [cards[index], cards[nextIndex]] = [cards[nextIndex], cards[index]];
+  saveAnalysisBoardConfig();
+  updateAnalysisBoardPresetControl();
+  scheduleAnalysisBoardRebuild();
+}
+
+function removeAnalysisBoardCard(cardId) {
+  const config = ensureAnalysisBoardConfig();
+  if (config.cards.length <= 1) return;
+  config.cards = config.cards.filter(card => card.id !== cardId);
+  saveAnalysisBoardConfig();
+  updateAnalysisBoardPresetControl();
+  scheduleAnalysisBoardRebuild();
+}
+
+function setupAnalysisBoardCustomization() {
+  ensureAnalysisBoardConfig();
+  const presetSelect = document.getElementById('analysisBoardPresetSelect');
+  const addButton = document.getElementById('analysisBoardAddCardBtn');
+  const grid = document.getElementById('analysisBoardGrid');
+
+  presetSelect?.addEventListener('change', () => {
+    if (presetSelect.value === 'custom') return;
+    applyAnalysisBoardPreset(presetSelect.value);
+  });
+  addButton?.addEventListener('click', addAnalysisBoardCard);
+
+  grid?.addEventListener('change', event => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    const cardId = target.dataset.cardId;
+    if (!cardId) return;
+    if (target.classList.contains('analysis-board-card-type')) {
+      updateAnalysisBoardCard(cardId, { type: target.value });
+    } else if (target.classList.contains('analysis-board-card-metric')) {
+      updateAnalysisBoardCard(cardId, { metric: target.value });
+    }
+  });
+
+  grid?.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-card-action]');
+    if (!button) return;
+    const cardId = button.dataset.cardId;
+    if (button.dataset.cardAction === 'up') moveAnalysisBoardCard(cardId, -1);
+    if (button.dataset.cardAction === 'down') moveAnalysisBoardCard(cardId, 1);
+    if (button.dataset.cardAction === 'remove') removeAnalysisBoardCard(cardId);
+  });
+
+  document.addEventListener('datasetsUpdated', () => {
+    if (window.analysisBoardReady && analysisBoardDatasetIndices.length) {
+      scheduleAnalysisBoardRebuild();
+    }
+  });
+  updateAnalysisBoardPresetControl();
+}
+
 
 let chartOpGeneration = 0;
 
@@ -2393,3 +2885,4 @@ window.buildAnalysisBoard = buildAnalysisBoard;
 window.refreshDatasetDisplayNames = refreshDatasetDisplayNames;
 window.refreshAnalysisBoardTheme = refreshAnalysisBoardTheme;
 window.resizeAnalysisBoardCharts = resizeAnalysisBoardCharts;
+window.setupAnalysisBoardCustomization = setupAnalysisBoardCustomization;

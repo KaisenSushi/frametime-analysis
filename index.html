@@ -18,9 +18,9 @@
       window.__ftaInitialTheme = theme;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20260802board2" />
-  <link rel="stylesheet" href="v2-shell.css?v=20260802board2" />
-  <link rel="stylesheet" href="v2-theme.css?v=20260802board2" />
+  <link rel="stylesheet" href="style.css?v=20260802board3" />
+  <link rel="stylesheet" href="v2-shell.css?v=20260802board3" />
+  <link rel="stylesheet" href="v2-theme.css?v=20260802board3" />
   <script>
     window.__ftaDependencyFailures = [];
     window.__ftaDependencyFailed = function (name) {
@@ -32,12 +32,12 @@
   <script defer src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.4/build/index.umd.min.js" onerror="window.__ftaDependencyFailed('Box/violin charts')"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js" onerror="window.__ftaDependencyFailed('jStat')"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js" onerror="window.__ftaDependencyFailed('PNG export')"></script>
-  <script defer src="dataManager.js?v=20260802board2" onerror="window.__ftaDependencyFailed('Data manager')"></script>
-  <script defer src="statsManager.js?v=20260802board2" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
-  <script defer src="chartManager.js?v=20260802board2" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
-  <script defer src="reliabilityManager.js?v=20260802board2" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
-  <script defer src="main.js?v=20260802board2" onerror="window.__ftaDependencyFailed('Application controller')"></script>
-  <script defer src="v2-shell.js?v=20260802board2" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
+  <script defer src="dataManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Data manager')"></script>
+  <script defer src="statsManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
+  <script defer src="chartManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
+  <script defer src="reliabilityManager.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
+  <script defer src="main.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Application controller')"></script>
+  <script defer src="v2-shell.js?v=20260802board3" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
 </head>
 
 <body>
@@ -225,7 +225,7 @@
               </label>
               </div>
               <div id="analysisBoardSetupHint" class="analysis-board-setup-hint hidden">
-                Builds a fixed overview with rendered frame time, rendered FPS percentiles, a box plot, and an FPS summary.
+                Builds a customizable multi-chart report. Choose a preset, then edit, add, remove, or reorder cards in Results.
               </div>
               <div class="viz-actions">
                 <button id="addToChartBtn" class="accent-button" type="button">Add to chart</button>
@@ -256,9 +256,17 @@
               <span id="chartStatusLine" class="chart-status-line" aria-live="polite"></span>
               <button id="resetZoomBtn" class="secondary-button mini" type="button" disabled>Reset zoom</button>
               <button id="exportChartPngBtn" class="secondary-button mini" type="button">Export PNG</button>
-              <div id="analysisBoardToolbar" class="analysis-board-toolbar hidden" aria-label="Analysis board export controls">
+              <div id="analysisBoardToolbar" class="analysis-board-toolbar hidden" aria-label="Analysis board controls">
                 <label for="analysisBoardTitleInput">Report title</label>
                 <input id="analysisBoardTitleInput" class="analysis-board-title-input" type="text" maxlength="80" value="Performance overview" autocomplete="off" />
+                <label for="analysisBoardPresetSelect">Preset</label>
+                <select id="analysisBoardPresetSelect" class="analysis-board-preset-select" aria-label="Analysis board preset">
+                  <option value="performance">Performance overview</option>
+                  <option value="consistency">Frame-time consistency</option>
+                  <option value="renderedDisplayed">Rendered vs displayed</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <button id="analysisBoardAddCardBtn" class="secondary-button mini" type="button">Add card</button>
                 <button id="exportAnalysisBoardPngBtn" class="secondary-button mini" type="button" disabled>Export board PNG</button>
               </div>
               <div class="chart-height-control">
@@ -285,33 +293,12 @@
               <p id="analysisBoardStatus" class="chart-status-line" aria-live="polite"></p>
             </div>
             <div id="analysisBoardLegend" class="analysis-board-legend" aria-label="Analysis board datasets"></div>
-            <div class="analysis-board-grid">
-              <article class="analysis-board-card">
-                <h3>Rendered frame time</h3>
-                <p>Frame-to-frame timing over the capture.</p>
-                <div class="analysis-board-canvas-wrap"><canvas id="analysisFrameTimeChart" role="img" aria-label="Rendered frame-time chart"></canvas></div>
-              </article>
-              <article class="analysis-board-card">
-                <h3>Rendered FPS percentiles</h3>
-                <p>Full rendered-FPS distribution from worst to best.</p>
-                <div class="analysis-board-canvas-wrap"><canvas id="analysisPercentileChart" role="img" aria-label="Rendered FPS percentile chart"></canvas></div>
-              </article>
-              <article class="analysis-board-card">
-                <h3>Rendered FPS distribution</h3>
-                <p>Median, spread, whiskers, and outliers.</p>
-                <div class="analysis-board-canvas-wrap"><canvas id="analysisBoxChart" role="img" aria-label="Rendered FPS box plot"></canvas></div>
-              </article>
-              <article class="analysis-board-card">
-                <h3>Rendered FPS summary</h3>
-                <p>Average FPS and worst-tail means.</p>
-                <div class="analysis-board-canvas-wrap"><canvas id="analysisSummaryChart" role="img" aria-label="Rendered FPS summary chart"></canvas></div>
-              </article>
-            </div>
+            <div id="analysisBoardGrid" class="analysis-board-grid" aria-label="Analysis board cards"></div>
             <div class="analysis-board-table-wrap">
               <table class="analysis-board-table">
-                <caption>Rendered FPS summary statistics</caption>
+                <caption id="analysisBoardStatsCaption">Board summary statistics</caption>
                 <thead>
-                  <tr><th scope="col">Dataset</th><th scope="col">Average</th><th scope="col">Worst 1%</th><th scope="col">Worst 0.1%</th><th scope="col">STDEV</th><th scope="col">Frames</th></tr>
+                  <tr><th scope="col">Dataset</th><th scope="col">Average</th><th scope="col">Worst 1%</th><th scope="col">Worst 0.1%</th><th scope="col">STDEV</th><th scope="col">Samples</th></tr>
                 </thead>
                 <tbody id="analysisBoardStatsBody"></tbody>
               </table>
