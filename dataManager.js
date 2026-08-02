@@ -34,15 +34,189 @@ function clearAllDatasets() {
   console.log("All datasets cleared.");
 }
 
+
+
+/** Columnar dataset helpers ------------------------------------------------- */
+function getDatasetRowCount(dataset) {
+  if (!dataset) return 0;
+  if (Number.isFinite(dataset.rowCount)) return dataset.rowCount;
+  if (dataset.columns) {
+    const first = Object.values(dataset.columns)[0];
+    if (first && Number.isFinite(first.length)) return first.length;
+  }
+  return dataset.rows?.length || 0;
+}
+
+function getDatasetColumn(dataset, ...candidates) {
+  const columns = dataset?.columns;
+  if (!columns) return null;
+
+  let lookup = dataset.__columnLookup;
+  if (!lookup) {
+    lookup = new Map();
+    Object.keys(columns).forEach(name => {
+      lookup.set(name.toLowerCase(), name);
+      lookup.set(canonKey(name), name);
+    });
+    Object.defineProperty(dataset, '__columnLookup', {
+      value: lookup,
+      configurable: true,
+      enumerable: false
+    });
+  }
+
+  for (const candidate of candidates) {
+    if (columns[candidate]) return columns[candidate];
+    const candidateText = String(candidate);
+    const match = lookup.get(candidateText.toLowerCase()) || lookup.get(canonKey(candidateText));
+    if (match) return columns[match];
+  }
+  return null;
+}
+
+function getDatasetColumnNames(dataset) {
+  return dataset?.columns ? Object.keys(dataset.columns) : [];
+}
+
+/**
+ * Locate the source used for rendered/presented frame time without allocating
+ * another full-size derived column. Values are converted to milliseconds by
+ * the returned toMilliseconds function.
+ */
+function getDatasetRenderedTimingSource(dataset) {
+  for (const alias of FRAME_ALIASES) {
+    const column = getDatasetColumn(dataset, alias.key);
+    if (column) {
+      return {
+        column,
+        source: 'timing',
+        scale: alias.scale,
+        toMilliseconds: value => value * alias.scale
+      };
+    }
+  }
+
+  // Legacy captures sometimes contain only FPS. Preserve the old behavior of
+  // back-filling frame time from a positive FPS sample.
+  const fpsColumn = getDatasetColumn(dataset, 'RenderedFPS', 'FPS');
+  if (fpsColumn) {
+    return {
+      column: fpsColumn,
+      source: 'fps',
+      scale: 1,
+      toMilliseconds: value => value > 0 ? 1000 / value : NaN
+    };
+  }
+  return null;
+}
+
+function createColumnarRowProxy(dataset, index) {
+  return new Proxy(Object.create(null), {
+    get(_target, property) {
+      if (property === Symbol.toStringTag) return 'ColumnarRow';
+      if (typeof property !== 'string') return undefined;
+      const column = getDatasetColumn(dataset, property);
+      if (!column) return undefined;
+      const value = column[index];
+      return Number.isFinite(value) ? value : null;
+    },
+    ownKeys() { return getDatasetColumnNames(dataset); },
+    getOwnPropertyDescriptor(_target, property) {
+      if (typeof property === 'string' && getDatasetColumn(dataset, property)) {
+        return { enumerable: true, configurable: true };
+      }
+      return undefined;
+    }
+  });
+}
+
+function attachDatasetCompatibility(dataset) {
+  if (!dataset || dataset.__columnarCompatibilityAttached) return dataset;
+  dataset.rowCount = getDatasetRowCount(dataset);
+  const rowArray = new Proxy([], {
+    get(target, property, receiver) {
+      if (property === 'length') return dataset.rowCount;
+      if (typeof property === 'string' && /^(?:0|[1-9]\d*)$/.test(property)) {
+        const index = Number(property);
+        return index < dataset.rowCount ? createColumnarRowProxy(dataset, index) : undefined;
+      }
+      return Reflect.get(target, property, receiver);
+    },
+    has(target, property) {
+      if (typeof property === 'string' && /^(?:0|[1-9]\d*)$/.test(property)) {
+        return Number(property) < dataset.rowCount;
+      }
+      return Reflect.has(target, property);
+    }
+  });
+  Object.defineProperty(dataset, 'rows', {
+    configurable: true,
+    enumerable: false,
+    get() { return rowArray; }
+  });
+  Object.defineProperty(dataset, '__columnarCompatibilityAttached', {
+    value: true,
+    configurable: true,
+    enumerable: false
+  });
+  return dataset;
+}
+
+function rowsToColumnar(rows, sourceColumns = []) {
+  const names = sourceColumns.length
+    ? sourceColumns.slice()
+    : Array.from(new Set((rows || []).flatMap(row => Object.keys(row || {}))));
+  const columns = Object.create(null);
+  names.forEach(name => {
+    const values = new Float64Array(rows.length);
+    values.fill(NaN);
+    let finiteCount = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const raw = rows[i]?.[name];
+      const value = typeof raw === 'number' ? raw : Number(raw);
+      if (Number.isFinite(value)) {
+        values[i] = value;
+        finiteCount++;
+      }
+    }
+    if (finiteCount) columns[name] = values;
+  });
+  return { columns, rowCount: rows.length };
+}
+
+function hydrateColumnarResult(result) {
+  if (!result) return result;
+  if (Array.isArray(result.columns)) {
+    const columns = Object.create(null);
+    result.columns.forEach(entry => {
+      columns[entry.name] = new Float64Array(entry.buffer, 0, entry.length);
+    });
+    result.columns = columns;
+  }
+  if (!result.columns && Array.isArray(result.rows)) {
+    const converted = rowsToColumnar(result.rows, result.metadata?.sourceColumns || []);
+    result.columns = converted.columns;
+    result.rowCount = converted.rowCount;
+    delete result.rows;
+  }
+  result.rowCount = Number.isFinite(result.rowCount)
+    ? result.rowCount
+    : (Object.values(result.columns || {})[0]?.length || 0);
+  return result;
+}
+
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 const SUPPORTED_CAPTURE_EXTENSION = /\.(csv|txt|json)$/i;
 
 const FRAME_ALIASES = [
   { key:'frametime',             scale:1     },
   { key:'frametime(ms)',         scale:1     },
+  { key:'frametimems',           scale:1     },
   { key:'frametime(us)',         scale:0.001 },
+  { key:'frametimeus',           scale:0.001 },
   { key:'msbetweenpresents',     scale:1     },
-  { key:'frame delta time(ms)',  scale:1     }
+  { key:'frame delta time(ms)',  scale:1     },
+  { key:'framedeltatimems',      scale:1     }
 ];
 
 function canonKey(str){
@@ -391,71 +565,296 @@ function parseCfxJson(text, fileName) {
 let dataWorker = null;
 let dataWorkerUrl = null;
 let dataWorkerRequestId = 0;
+let dataWorkerChunkSequence = 0;
 const dataWorkerRequests = new Map();
+const dataWorkerChunkAcks = new Map();
 
 function getDataWorkerSource() {
-  const declarations = [
-    `const FRAME_ALIASES = ${JSON.stringify(FRAME_ALIASES)};`,
-    canonKey.toString(),
-    normaliseRow.toString(),
-    splitCsvRecords.toString(),
-    countUnquotedDelimiter.toString(),
-    detectCsvDelimiter.toString(),
-    parseCSVLine.toString(),
-    makeUniqueHeaders.toString(),
-    parseNumericCsvValue.toString(),
-    isRecognisedTimingHeader.toString(),
-    parseCSVDetailed.toString(),
-    parseCfxJsonDetailed.toString()
-  ];
-  declarations.push(`self.onmessage = function (event) {
-    const { id, buffer, fileName, isJson } = event.data;
-    try {
-      const text = new TextDecoder('utf-8').decode(buffer);
-      const result = isJson
-        ? parseCfxJsonDetailed(text, fileName)
-        : parseCSVDetailed(text, fileName);
-      self.postMessage({ id, result });
-    } catch (error) {
-      self.postMessage({ id, error: error && error.message ? error.message : String(error) });
+  return `
+const states = new Map();
+const FRAME_ALIASES = ${JSON.stringify(FRAME_ALIASES)};
+function canonKey(str){ return String(str ?? '').toLowerCase().replace(/\\s+/g,''); }
+function countUnquotedDelimiter(record, delimiter) {
+  let count = 0, inQuotes = false;
+  for (let i = 0; i < record.length; i++) {
+    const char = record[i];
+    if (char === '"') {
+      if (inQuotes && record[i + 1] === '"') i++;
+      else inQuotes = !inQuotes;
+    } else if (!inQuotes && char === delimiter) count++;
+  }
+  return count;
+}
+function detectCsvDelimiter(headerRecord) {
+  return [',', '\\t', ';'].reduce((best, delimiter) => {
+    const count = countUnquotedDelimiter(headerRecord, delimiter);
+    return count > best.count ? { delimiter, count } : best;
+  }, { delimiter: ',', count: -1 }).delimiter;
+}
+function parseCSVLine(line, delimiter) {
+  const result = []; let inQuotes = false, currentValue = '';
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') { currentValue += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) { result.push(currentValue); currentValue = ''; }
+    else currentValue += char;
+  }
+  if (inQuotes) throw new Error('CSV contains an unterminated quoted field.');
+  result.push(currentValue); return result;
+}
+function makeUniqueHeaders(rawHeaders) {
+  const counts = new Map(), duplicates = [];
+  const headers = rawHeaders.map((value, index) => {
+    const base = String(value ?? '').trim() || ('Column ' + (index + 1));
+    const key = base.toLowerCase(), count = (counts.get(key) || 0) + 1;
+    counts.set(key, count);
+    if (count === 1) return base;
+    duplicates.push(base); return base + ' (' + count + ')';
+  });
+  return { headers, duplicates: [...new Set(duplicates)] };
+}
+function parseNumericCsvValue(raw, delimiter) {
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed) return NaN;
+  const normalized = delimiter === ';' && /^[+-]?(?:\\d+),(?:\\d+)(?:[eE][+-]?\\d+)?$/.test(trimmed)
+    ? trimmed.replace(',', '.') : trimmed;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : NaN;
+}
+function isRecognisedTimingHeader(header) {
+  const key = String(header).toLowerCase().replace(/[\\s_()\\[\\]-]+/g, '');
+  return /^(frametime|frametimems|frametimeus|framedeltatimems|msbetweenpresents|msbetweendisplaychange|msinpresentapi|msuntilrendercomplete|msuntilpresented|displayedframetime|renderedfps|displayedfps|fps)$/.test(key);
+}
+const COLUMN_CHUNK_SIZE = 65536;
+class ColumnBuilder {
+  constructor(initialLength = 0) {
+    this.chunks = [];
+    this.current = new Float64Array(COLUMN_CHUNK_SIZE);
+    this.current.fill(NaN);
+    this.used = 0;
+    this.length = 0;
+    if (initialLength) this.fill(NaN, initialLength);
+  }
+  sealCurrent() {
+    if (this.used !== COLUMN_CHUNK_SIZE) return;
+    this.chunks.push(this.current);
+    this.current = new Float64Array(COLUMN_CHUNK_SIZE);
+    this.current.fill(NaN);
+    this.used = 0;
+  }
+  push(value) {
+    this.sealCurrent();
+    this.current[this.used++] = value;
+    this.length++;
+  }
+  fill(value, count) {
+    let remaining = Math.max(0, count | 0);
+    while (remaining > 0) {
+      this.sealCurrent();
+      const available = COLUMN_CHUNK_SIZE - this.used;
+      const take = Math.min(available, remaining);
+      this.current.fill(value, this.used, this.used + take);
+      this.used += take;
+      this.length += take;
+      remaining -= take;
     }
-  };`);
-  return declarations.join('\n\n');
+  }
+  toTyped(targetLength = this.length) {
+    const result = new Float64Array(targetLength);
+    result.fill(NaN);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      const take = Math.min(chunk.length, targetLength - offset);
+      if (take <= 0) break;
+      result.set(take === chunk.length ? chunk : chunk.subarray(0, take), offset);
+      offset += take;
+    }
+    if (offset < targetLength && this.used) {
+      const take = Math.min(this.used, targetLength - offset);
+      result.set(this.current.subarray(0, take), offset);
+    }
+    return result;
+  }
+}
+function makeState(id, fileName) {
+  return { id, fileName, decoder: new TextDecoder('utf-8'), record: '', inQuotes: false,
+    pendingQuote: false, skipLf: false, headerReady: false, delimiter: ',', headers: [],
+    builders: [], numericCounts: [], rowCount: 0, malformedRows: 0, warnings: [], bytesRead: 0 };
+}
+function acceptRecord(state, record) {
+  if (!state.headerReady) {
+    record = record.replace(/^\\uFEFF/, '');
+    if (!record.trim()) return;
+    state.delimiter = detectCsvDelimiter(record);
+    const unique = makeUniqueHeaders(parseCSVLine(record, state.delimiter));
+    state.headers = unique.headers;
+    state.builders = state.headers.map(() => null);
+    state.numericCounts = state.headers.map(() => 0);
+    if (unique.duplicates.length) state.warnings.push('Duplicate column name(s) were disambiguated in ' + state.fileName + ': ' + unique.duplicates.join(', ') + '.');
+    if (!state.headers.some(isRecognisedTimingHeader)) state.warnings.push('No recognised timing column was found in ' + state.fileName + '. Detected: ' + (state.headers.slice(0, 8).join(', ') || 'none') + '.');
+    state.headerReady = true; return;
+  }
+  if (!record.trim()) return;
+  const values = parseCSVLine(record, state.delimiter);
+  if (values.length !== state.headers.length) { state.malformedRows++; return; }
+  for (let i = 0; i < state.headers.length; i++) {
+    const value = parseNumericCsvValue(values[i], state.delimiter);
+    if (Number.isFinite(value)) {
+      if (!state.builders[i]) state.builders[i] = new ColumnBuilder(state.rowCount);
+      state.builders[i].push(value);
+      state.numericCounts[i]++;
+    } else if (state.builders[i]) {
+      state.builders[i].push(NaN);
+    }
+  }
+  state.rowCount++;
+}
+function feedText(state, text, final = false) {
+  for (let i = 0; i < text.length; i++) {
+    let char = text[i];
+    if (state.skipLf) { state.skipLf = false; if (char === '\\n') continue; }
+    if (state.pendingQuote) {
+      if (char === '"') { state.record += '""'; state.pendingQuote = false; continue; }
+      state.record += '"'; state.inQuotes = false; state.pendingQuote = false;
+    }
+    if (char === '"') {
+      if (state.inQuotes) state.pendingQuote = true;
+      else { state.record += char; state.inQuotes = true; }
+      continue;
+    }
+    if ((char === '\\n' || char === '\\r') && !state.inQuotes) {
+      acceptRecord(state, state.record); state.record = '';
+      if (char === '\\r') state.skipLf = true;
+      continue;
+    }
+    state.record += char;
+  }
+  if (final) {
+    if (state.pendingQuote) { state.record += '"'; state.pendingQuote = false; state.inQuotes = false; }
+    if (state.inQuotes) throw new Error('CSV contains an unterminated quoted field.');
+    if (state.record || !state.headerReady) acceptRecord(state, state.record);
+  }
+}
+function finishCsv(state) {
+  const columns = [], transfers = [];
+  for (let i = 0; i < state.headers.length; i++) {
+    if (!state.numericCounts[i] || !state.builders[i]) continue;
+    if (state.builders[i].length < state.rowCount) state.builders[i].fill(NaN, state.rowCount - state.builders[i].length);
+    const typed = state.builders[i].toTyped(state.rowCount);
+    columns.push({ name: state.headers[i], buffer: typed.buffer, length: typed.length });
+    transfers.push(typed.buffer);
+  }
+  if (state.malformedRows) state.warnings.push('Skipped ' + state.malformedRows.toLocaleString() + ' malformed row(s) in ' + state.fileName + ' because their column counts did not match the header.');
+  return { result: { columns, rowCount: state.rowCount, warnings: state.warnings,
+    metadata: { format: 'csv', delimiter: state.delimiter === '\\t' ? 'tab' : state.delimiter,
+      sourceColumns: state.headers, malformedRows: state.malformedRows, storage: 'columnar-float64' } }, transfers };
+}
+function jsonToColumns(text, fileName) {
+  const warnings = []; let json;
+  try { json = JSON.parse(text); } catch (error) { return { result: { error: 'invalid_json', message: error.message, columns: [], rowCount: 0, warnings, metadata: { format: 'json' } }, transfers: [] }; }
+  if (!json?.Runs?.length) return { result: { columns: [], rowCount: 0, warnings: ['No Runs[] array was found in ' + fileName + '.'], metadata: { format: 'json', sourceColumns: [] } }, transfers: [] };
+  const sourceColumns = new Set();
+  const runs = [];
+  let totalRows = 0;
+  json.Runs.forEach((run, runIndex) => {
+    const fields = Object.entries(run?.CaptureData ?? {}).filter(([, value]) => Array.isArray(value));
+    if (!fields.length) return;
+    fields.forEach(([key]) => sourceColumns.add(key));
+    const lengths = fields.map(([, value]) => value.length), frames = Math.min(...lengths);
+    if (new Set(lengths).size > 1) warnings.push('CaptureData arrays in run ' + (runIndex + 1) + ' of ' + fileName + ' had different lengths and were trimmed to ' + frames.toLocaleString() + ' frame(s).');
+    runs.push({ fields, frames, offset: totalRows });
+    totalRows += frames;
+  });
+  const typedColumns = new Map();
+  const numericCounts = new Map();
+  for (const name of sourceColumns) {
+    const typed = new Float64Array(totalRows);
+    typed.fill(NaN);
+    typedColumns.set(name, typed);
+    numericCounts.set(name, 0);
+  }
+  runs.forEach(({ fields, frames, offset }) => {
+    fields.forEach(([name, values]) => {
+      const target = typedColumns.get(name);
+      let count = numericCounts.get(name) || 0;
+      for (let i = 0; i < frames; i++) {
+        const value = Number(values[i]);
+        if (Number.isFinite(value)) { target[offset + i] = value; count++; }
+      }
+      numericCounts.set(name, count);
+    });
+  });
+  const columns = [], transfers = [];
+  for (const [name, typed] of typedColumns) {
+    if (!numericCounts.get(name)) continue;
+    columns.push({ name, buffer: typed.buffer, length: typed.length });
+    transfers.push(typed.buffer);
+  }
+  return { result: { columns, rowCount: totalRows, warnings, metadata: { format: 'json', sourceColumns: [...sourceColumns], storage: 'columnar-float64' } }, transfers };
+}
+self.onmessage = function(event) {
+  const data = event.data || {};
+  try {
+    if (data.type === 'startCsv') { states.set(data.id, makeState(data.id, data.fileName)); self.postMessage({ id: data.id, type: 'started' }); return; }
+    if (data.type === 'csvChunk') {
+      const state = states.get(data.id); if (!state) throw new Error('CSV stream state is unavailable.');
+      const text = state.decoder.decode(data.buffer, { stream: !data.final });
+      state.bytesRead = data.bytesRead || state.bytesRead; feedText(state, text, Boolean(data.final));
+      if (data.final) { const finished = finishCsv(state); states.delete(data.id); self.postMessage({ id: data.id, type: 'result', result: finished.result }, finished.transfers); }
+      else self.postMessage({ id: data.id, type: 'chunkAck', sequence: data.sequence, rowCount: state.rowCount, bytesRead: state.bytesRead });
+      return;
+    }
+    if (data.type === 'fullCsv') {
+      const text = new TextDecoder('utf-8').decode(data.buffer);
+      const state = makeState(data.id, data.fileName);
+      feedText(state, text, true);
+      const finished = finishCsv(state);
+      self.postMessage({ id: data.id, type: 'result', result: finished.result }, finished.transfers);
+      return;
+    }
+    if (data.type === 'json') {
+      const text = new TextDecoder('utf-8').decode(data.buffer); const finished = jsonToColumns(text, data.fileName);
+      self.postMessage({ id: data.id, type: 'result', result: finished.result }, finished.transfers); return;
+    }
+  } catch (error) { states.delete(data.id); self.postMessage({ id: data.id, type: 'error', error: error?.message || String(error) }); }
+};`;
 }
 
 function resetDataWorker(error) {
   if (dataWorker) dataWorker.terminate();
   if (dataWorkerUrl) URL.revokeObjectURL(dataWorkerUrl);
-  dataWorker = null;
-  dataWorkerUrl = null;
+  dataWorker = null; dataWorkerUrl = null;
   if (error) {
-    dataWorkerRequests.forEach(({ reject, cleanup }) => {
-      cleanup?.();
-      reject(error);
-    });
+    dataWorkerRequests.forEach(({ reject, cleanup }) => { cleanup?.(); reject(error); });
     dataWorkerRequests.clear();
+    dataWorkerChunkAcks.forEach(({ reject }) => reject(error));
+    dataWorkerChunkAcks.clear();
   }
 }
 
 function getDataWorker() {
   if (dataWorker) return dataWorker;
-  if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
-    return null;
-  }
+  if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') return null;
   dataWorkerUrl = URL.createObjectURL(new Blob([getDataWorkerSource()], { type: 'text/javascript' }));
   dataWorker = new Worker(dataWorkerUrl);
   dataWorker.onmessage = event => {
-    const { id, result, error } = event.data || {};
-    const request = dataWorkerRequests.get(id);
-    if (!request) return;
-    dataWorkerRequests.delete(id);
-    request.cleanup?.();
-    if (error) request.reject(new Error(error));
-    else request.resolve(result);
+    const { id, type, result, error, sequence, rowCount, bytesRead } = event.data || {};
+    if (type === 'chunkAck') {
+      const ack = dataWorkerChunkAcks.get(sequence); if (!ack) return;
+      dataWorkerChunkAcks.delete(sequence); ack.resolve({ rowCount, bytesRead }); return;
+    }
+    if (type === 'started') return;
+    if (type === 'error' || error) {
+      resetDataWorker(new Error(error || 'The capture parser worker failed.'));
+      return;
+    }
+    const request = dataWorkerRequests.get(id); if (!request) return;
+    dataWorkerRequests.delete(id); request.cleanup?.();
+    request.resolve(hydrateColumnarResult(result));
   };
-  dataWorker.onerror = event => {
-    resetDataWorker(new Error(event.message || 'The capture parser worker failed.'));
-  };
+  dataWorker.onerror = event => resetDataWorker(new Error(event.message || 'The capture parser worker failed.'));
   return dataWorker;
 }
 
@@ -547,35 +946,15 @@ function finishImportProgress(session, message, { cancelled = false } = {}) {
 
 function readFileAsArrayBuffer(file, { signal, onProgress } = {}) {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(makeImportAbortError());
-      return;
-    }
-
+    if (signal?.aborted) { reject(makeImportAbortError()); return; }
     const reader = new FileReader();
     if (activeImportSession) activeImportSession.reader = reader;
     let settled = false;
-
-    const cleanup = () => {
-      signal?.removeEventListener('abort', abort);
-      if (activeImportSession?.reader === reader) activeImportSession.reader = null;
-    };
-    const finish = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      callback(value);
-    };
-    const abort = () => {
-      try { reader.abort(); } catch (_) {}
-      finish(reject, makeImportAbortError());
-    };
-
+    const cleanup = () => { signal?.removeEventListener('abort', abort); if (activeImportSession?.reader === reader) activeImportSession.reader = null; };
+    const finish = (callback, value) => { if (settled) return; settled = true; cleanup(); callback(value); };
+    const abort = () => { try { reader.abort(); } catch (_) {} finish(reject, makeImportAbortError()); };
     signal?.addEventListener('abort', abort, { once: true });
-    reader.onprogress = event => {
-      if (!event.lengthComputable) return;
-      onProgress?.(event.loaded, event.total);
-    };
+    reader.onprogress = event => { if (event.lengthComputable) onProgress?.(event.loaded, event.total); };
     reader.onerror = () => finish(reject, reader.error || new Error(`Could not read ${file.name}.`));
     reader.onabort = () => finish(reject, makeImportAbortError());
     reader.onload = () => finish(resolve, reader.result);
@@ -583,42 +962,97 @@ function readFileAsArrayBuffer(file, { signal, onProgress } = {}) {
   });
 }
 
-async function parseCaptureFile(file, { signal, onReadProgress, onStage } = {}) {
-  onStage?.('Reading file');
-  const buffer = await readFileAsArrayBuffer(file, {
-    signal,
-    onProgress: onReadProgress
+function postWorkerChunk(worker, payload, transfer) {
+  const sequence = ++dataWorkerChunkSequence;
+  payload.sequence = sequence;
+  return new Promise((resolve, reject) => {
+    dataWorkerChunkAcks.set(sequence, { resolve, reject });
+    worker.postMessage(payload, transfer);
   });
-  if (signal?.aborted) throw makeImportAbortError();
+}
 
+async function parseCsvStream(file, { signal, onReadProgress, onParseProgress } = {}) {
+  const worker = getDataWorker();
+  if (!worker || typeof file.stream !== 'function') return null;
+  const id = ++dataWorkerRequestId;
+  const resultPromise = new Promise((resolve, reject) => {
+    const abort = () => resetDataWorker(makeImportAbortError());
+    const cleanup = () => signal?.removeEventListener('abort', abort);
+    signal?.addEventListener('abort', abort, { once: true });
+    dataWorkerRequests.set(id, { resolve, reject, cleanup });
+  });
+  // The current chunk acknowledgement may reject before this final-result
+  // promise is awaited during cancellation. Register a handler immediately so
+  // an intentional abort never surfaces as an unhandled rejection.
+  resultPromise.catch(() => {});
+  worker.postMessage({ type: 'startCsv', id, fileName: file.name });
+  const reader = file.stream().getReader();
+  if (activeImportSession) activeImportSession.streamReader = reader;
+  let bytesRead = 0;
+  let lastProgressAt = 0;
+  let lastProgressBytes = 0;
+  try {
+    while (true) {
+      if (signal?.aborted) throw makeImportAbortError();
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      const buffer = value.byteOffset === 0 && value.byteLength === value.buffer.byteLength
+        ? value.buffer
+        : value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+      const ack = await postWorkerChunk(worker, { type: 'csvChunk', id, buffer, final: false, bytesRead }, [buffer]);
+
+      // Updating several DOM nodes for every small stream chunk can become a
+      // measurable cost on low-end systems. Report at most about ten times per
+      // second, while still forcing updates after meaningful byte progress.
+      const now = Date.now();
+      const shouldReport = bytesRead >= file.size ||
+        now - lastProgressAt >= 100 ||
+        bytesRead - lastProgressBytes >= 2 * 1024 * 1024;
+      if (shouldReport) {
+        if (onParseProgress) onParseProgress(ack.rowCount, bytesRead, file.size);
+        else onReadProgress?.(bytesRead, file.size);
+        lastProgressAt = now;
+        lastProgressBytes = bytesRead;
+      }
+    }
+    const empty = new ArrayBuffer(0);
+    worker.postMessage({ type: 'csvChunk', id, buffer: empty, final: true, bytesRead }, [empty]);
+    return await resultPromise;
+  } catch (error) {
+    try { await reader.cancel(); } catch (_) {}
+    if (dataWorkerRequests.has(id)) resetDataWorker(error?.name === 'AbortError' ? error : new Error(error.message));
+    throw error;
+  } finally {
+    if (activeImportSession?.streamReader === reader) activeImportSession.streamReader = null;
+  }
+}
+
+async function parseCaptureFile(file, { signal, onReadProgress, onStage, onParseProgress } = {}) {
+  const isJson = file.name.toLowerCase().endsWith('.json');
+  if (!isJson) {
+    onStage?.('Streaming and parsing rows');
+    const streamed = await parseCsvStream(file, { signal, onReadProgress, onParseProgress });
+    if (streamed) return streamed;
+  }
+
+  onStage?.('Reading file');
+  const buffer = await readFileAsArrayBuffer(file, { signal, onProgress: onReadProgress });
+  if (signal?.aborted) throw makeImportAbortError();
   onStage?.('Parsing rows');
   const worker = getDataWorker();
   if (worker) {
     const id = ++dataWorkerRequestId;
     return new Promise((resolve, reject) => {
-      const abort = () => {
-        if (!dataWorkerRequests.has(id)) return;
-        resetDataWorker(makeImportAbortError());
-      };
+      const abort = () => { if (dataWorkerRequests.has(id)) resetDataWorker(makeImportAbortError()); };
       const cleanup = () => signal?.removeEventListener('abort', abort);
       signal?.addEventListener('abort', abort, { once: true });
       dataWorkerRequests.set(id, { resolve, reject, cleanup });
-      worker.postMessage({
-        id,
-        buffer,
-        fileName: file.name,
-        isJson: file.name.toLowerCase().endsWith('.json')
-      }, [buffer]);
+      worker.postMessage({ type: isJson ? 'json' : 'fullCsv', id, buffer, fileName: file.name }, [buffer]);
     });
   }
-
-  if (signal?.aborted) throw makeImportAbortError();
   const text = new TextDecoder('utf-8').decode(buffer);
-  const result = file.name.toLowerCase().endsWith('.json')
-    ? parseCfxJsonDetailed(text, file.name)
-    : parseCSVDetailed(text, file.name);
-  if (signal?.aborted) throw makeImportAbortError();
-  return result;
+  return hydrateColumnarResult(isJson ? parseCfxJsonDetailed(text, file.name) : parseCSVDetailed(text, file.name));
 }
 
 function cancelCaptureImport() {
@@ -627,6 +1061,10 @@ function cancelCaptureImport() {
   session.cancelled = true;
   session.controller?.abort();
   try { session.reader?.abort?.(); } catch (_) {}
+  try {
+    const cancellation = session.streamReader?.cancel?.();
+    cancellation?.catch?.(() => {});
+  } catch (_) {}
   resetDataWorker(makeImportAbortError());
   updateImportProgress(session, {
     fileIndex: Math.min(session.completedFiles, Math.max(0, session.totalFiles - 1)),
@@ -729,7 +1167,8 @@ async function handleFileUpload(e) {
     currentFileName: '',
     cancelled: false,
     controller: null,
-    reader: null
+    reader: null,
+    streamReader: null
   };
   activeImportSession = session;
   setImportUiBusy(true);
@@ -786,14 +1225,22 @@ async function handleFileUpload(e) {
           });
         },
         onStage(stage) {
-          if (stage === 'Parsing rows') {
+          if (stage === 'Parsing rows' || stage === 'Streaming and parsing rows') {
             updateImportProgress(session, {
               fileIndex,
               fileName: file.name,
-              stage: 'Parsing rows in background worker',
+              stage: stage === 'Streaming and parsing rows' ? 'Streaming and parsing rows' : 'Parsing rows in background worker',
               fileProgress: 0.68
             });
           }
+        },
+        onParseProgress(rowCount, loaded, total) {
+          const fraction = total > 0 ? loaded / total : 0;
+          updateImportProgress(session, {
+            fileIndex, fileName: file.name,
+            stage: `Streaming CSV — ${(loaded / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB`,
+            fileProgress: Math.min(0.82, fraction * 0.82), rowCount
+          });
         }
       });
 
@@ -803,14 +1250,14 @@ async function handleFileUpload(e) {
         fileName: file.name,
         stage: 'Validating metrics',
         fileProgress: 0.84,
-        rowCount: parsed?.rows?.length ?? null
+        rowCount: parsed?.rowCount ?? null
       });
 
       (parsed.warnings || []).forEach(message => window.notify?.(message, 'warning'));
       if (parsed?.error === 'invalid_json') {
         throw new Error(`Invalid JSON: ${parsed.message}`);
       }
-      if (!parsed?.rows?.length) {
+      if (!parsed?.rowCount) {
         throw new Error('No valid data rows were found.');
       }
 
@@ -824,17 +1271,18 @@ async function handleFileUpload(e) {
           fileName: file.name,
           stage: 'Finalizing dataset',
           fileProgress: 0.94,
-          rowCount: parsed.rows.length
+          rowCount: parsed.rowCount
         });
 
-        const datasetObj = {
+        const datasetObj = attachDatasetCompatibility({
           id: duplicate.action === 'replace'
             ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
             : window.nextDatasetId++,
           name: duplicate.name,
-          rows: parsed.rows,
+          columns: parsed.columns,
+          rowCount: parsed.rowCount,
           source: parsed.metadata || null
-        };
+        });
 
         if (duplicate.action === 'replace') {
           const existing = window.allDatasets[duplicate.existingIndex];
@@ -948,7 +1396,7 @@ function refreshDatasetLists() {
 
       const label = document.createElement('span');
       label.className = 'dataset-list-name';
-      label.textContent = `${ds.name} (${ds.rows.length} rows)`;
+      label.textContent = `${ds.name} (${getDatasetRowCount(ds)} rows)`;
       li.appendChild(label);
 
       const removeBtn = document.createElement('button');
@@ -988,52 +1436,62 @@ function refreshDatasetLists() {
 /**
  * Collect numeric/derived metric keys present in one dataset.
  */
+function columnHasFiniteValue(column, { positive = false } = {}) {
+  if (!column?.length) return false;
+  for (let i = 0; i < column.length; i++) {
+    const value = column[i];
+    if (Number.isFinite(value) && (!positive || value > 0)) return true;
+  }
+  return false;
+}
+
 function numericColumnsForDataset(ds) {
-  if (!ds?.rows?.length) return new Set();
-  const cols = Object.keys(ds.rows[0] || {});
+  if (!getDatasetRowCount(ds)) return new Set();
+
   const numeric = new Set();
-  cols.forEach(col => {
-    if (METRIC_BLACKLIST.has(col)) return;
-    for (let i = 0; i < Math.min(15, ds.rows.length); i++) {
-      const v = ds.rows[i][col];
-      if (v === null || v === '' || v === undefined) continue;
-      const num = Number(v);
-      if (Number.isFinite(num)) {
-        numeric.add(col);
-        break;
-      }
-    }
-  });
-  if (ds.rows.some(r => Number.isFinite(r.FrameTime))) numeric.add('FrameTime');
-  if (ds.rows.some(r => Number.isFinite(r.FPS))) numeric.add('FPS');
-
-  const hasPresents = ds.rows.some(r => getMetricValue(r, 'RenderedFPS') != null);
-  const hasDisplay = ds.rows.some(r => getMetricValue(r, 'DisplayedFPS') != null);
-  const hasGpuBusy = ds.rows.some(r => getMetricValue(r, 'MsGPUBusy') != null);
-  const hasUntilDisplayed = ds.rows.some(r => getMetricValue(r, 'MsUntilDisplayed') != null);
-  const hasFrametimes = ds.rows.some(r => Number.isFinite(r.FrameTime) && r.FrameTime > 0);
-  const hasDisplayedFrametimes = ds.rows.some(r => {
-    const v = getMetricValue(r, 'DisplayedFrameTime');
-    return Number.isFinite(v) && v > 0;
+  getDatasetColumnNames(ds).forEach(columnName => {
+    if (METRIC_BLACKLIST.has(columnName)) return;
+    if (columnHasFiniteValue(getDatasetColumn(ds, columnName))) numeric.add(columnName);
   });
 
-  if (hasPresents) numeric.add('RenderedFPS');
-  if (hasDisplay) numeric.add('DisplayedFPS');
-  if (hasGpuBusy) numeric.add('MsGPUBusy');
-  if (hasUntilDisplayed) numeric.add('MsUntilDisplayed');
-  if (hasDisplayedFrametimes) numeric.add('DisplayedFrameTime');
-  if (hasFrametimes) {
+  const renderedTimingSource = getDatasetRenderedTimingSource(ds);
+  const renderedTiming = renderedTimingSource?.column || null;
+  const displayedTiming = getDatasetColumn(
+    ds,
+    'MsBetweenDisplayChange',
+    'MsBetweenDisplayChanges',
+    'DisplayedFrameTime'
+  );
+  const renderedFps = getDatasetColumn(ds, 'RenderedFPS', 'FPS');
+  const displayedFps = getDatasetColumn(ds, 'DisplayedFPS');
+  const gpuBusy = getDatasetColumn(ds, 'MsGPUBusy', 'GPUBusy', 'MsGpuBusy');
+  const untilDisplayed = getDatasetColumn(ds, 'MsUntilDisplayed', 'MsUntilDisplayComplete');
+
+  const hasRenderedTiming = columnHasFiniteValue(renderedTiming, { positive: true });
+  const hasDisplayedTiming = columnHasFiniteValue(displayedTiming, { positive: true });
+  const hasRenderedFps = columnHasFiniteValue(renderedFps, { positive: true }) || hasRenderedTiming;
+  const hasDisplayedFps = columnHasFiniteValue(displayedFps, { positive: true }) || hasDisplayedTiming;
+
+  if (hasRenderedTiming) numeric.add('FrameTime');
+  if (hasRenderedFps) {
+    numeric.add('FPS');
+    numeric.add('RenderedFPS');
+  }
+  if (hasDisplayedTiming) numeric.add('DisplayedFrameTime');
+  if (hasDisplayedFps) numeric.add('DisplayedFPS');
+  if (columnHasFiniteValue(gpuBusy)) numeric.add('MsGPUBusy');
+  if (columnHasFiniteValue(untilDisplayed)) numeric.add('MsUntilDisplayed');
+
+  if (hasRenderedTiming) {
     numeric.add('Rendered_FTSD');
     numeric.add('Rendered_Coefficient_of_Variation');
     numeric.add('Rendered_RMSSD');
     numeric.add('Rendered_Stepwise_Relative_SD');
-    // Distribution-shape only - skip legacy RMSSD / CV / Stepwise aliases
-    // (already covered by Rendered_* / Displayed_* metrics above).
     numeric.add('Skewness');
     numeric.add('Kurtosis');
     numeric.add('Nonparametric_Skew');
   }
-  if (hasDisplayedFrametimes) {
+  if (hasDisplayedTiming) {
     numeric.add('Displayed_FTSD');
     numeric.add('Displayed_Coefficient_of_Variation');
     numeric.add('Displayed_RMSSD');
@@ -1077,8 +1535,8 @@ function computeAvailableMetrics(selectedIdxs) {
   if (!window.showAdvancedMetrics) {
     metrics = metrics.filter(m => CORE_METRICS.includes(m));
     if (!metrics.length) {
-      metrics = ['RenderedFPS', 'DisplayedFPS'].filter(m =>
-        pool.some(ds => ds.rows?.some(r => getMetricValue(r, m) != null))
+      metrics = ['RenderedFPS', 'DisplayedFPS'].filter(metric =>
+        pool.some(dataset => numericColumnsForDataset(dataset).has(metric))
       );
     }
   }
@@ -1391,6 +1849,11 @@ window.handleFileUpload = handleFileUpload;
 window.cancelCaptureImport = cancelCaptureImport;
 window.refreshDatasetLists = refreshDatasetLists;
 window.getDatasetIndexById = getDatasetIndexById;
+window.getDatasetRowCount = getDatasetRowCount;
+window.getDatasetColumn = getDatasetColumn;
+window.getDatasetColumnNames = getDatasetColumnNames;
+window.getDatasetRenderedTimingSource = getDatasetRenderedTimingSource;
+window.attachDatasetCompatibility = attachDatasetCompatibility;
 window.updateMetricDropdowns = updateMetricDropdowns;
 window.getMetricDisplayName = getMetricDisplayName;
 window.parseCSVLine = parseCSVLine;

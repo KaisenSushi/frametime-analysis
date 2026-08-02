@@ -394,22 +394,12 @@ function sampleSeries(values, maxPoints) {
  * X is always valid-sample index (1..n after shared metric filtering).
  */
 function getLineScatterPoints(dataset, metric) {
-  if (!dataset._pointCache) dataset._pointCache = Object.create(null);
-  const cacheKey = metric;
-  if (dataset._pointCache[cacheKey]) return dataset._pointCache[cacheKey];
+  if (dataset._pointCache?.metric === metric) return dataset._pointCache.result;
 
-  const rows = dataset.rows || [];
-  const points = [];
-  let frameIndex = 0;
-
-  for (let i = 0; i < rows.length; i++) {
-    const value = getMetricValue(rows[i], metric);
-    const valid = typeof window.isValidMetricSample === 'function'
-      ? window.isValidMetricSample(metric, value)
-      : Number.isFinite(value);
-    if (!valid) continue;
-    frameIndex++;
-    points.push({ x: frameIndex, y: value });
+  const values = getMetricSeries(dataset, metric);
+  const points = new Array(values.length);
+  for (let i = 0; i < values.length; i++) {
+    points[i] = { x: i + 1, y: values[i] };
   }
 
   const totalPoints = points.length;
@@ -418,7 +408,9 @@ function getLineScatterPoints(dataset, metric) {
     : points;
 
   const result = { points: displayPoints, totalPoints, displayedPoints: displayPoints.length };
-  dataset._pointCache[cacheKey] = result;
+  // Keep only the most recently used point series so several metrics do not
+  // duplicate a large capture in memory.
+  dataset._pointCache = { metric, result };
   return result;
 }
 
@@ -550,7 +542,7 @@ function rebuildCurrentHistogramDatasets() {
   const seriesForBins = [];
   indices.forEach(idx => {
     const ds = window.allDatasets?.[idx];
-    if (!ds?.rows?.length) return;
+    if (!(typeof window.getDatasetRowCount === 'function' ? window.getDatasetRowCount(ds) : ds?.rows?.length)) return;
     const vals = getMetricSeries(ds, metric);
     if (vals.length) seriesForBins.push(vals);
   });
@@ -1410,7 +1402,7 @@ function addToChartCore(generation) {
       .filter(Number.isInteger);
     const addedIndices = indices.filter(idx => {
       const ds = window.allDatasets[idx];
-      return Boolean(ds?.rows?.length && getMetricSeries(ds, metric).length);
+      return Boolean((typeof window.getDatasetRowCount === 'function' ? window.getDatasetRowCount(ds) : ds?.rows?.length) && getMetricSeries(ds, metric).length);
     });
     const allIndices = existingIndices
       .filter(idx => !addedIndices.includes(idx))
@@ -1443,7 +1435,7 @@ function addToChartCore(generation) {
   indices.forEach(idx => {
     if (isStale()) return;
     const ds = window.allDatasets[idx];
-    if (!ds?.rows?.length) return;
+    if (!(typeof window.getDatasetRowCount === 'function' ? window.getDatasetRowCount(ds) : ds?.rows?.length)) return;
     removeExistingSeriesForDataset(idx, metric);
 
     const vals = getMetricSeries(ds, metric);

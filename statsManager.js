@@ -543,16 +543,55 @@ function isValidMetricSample(metric, value) {
   return true;
 }
 
+function getColumn(dataset, ...candidates) {
+  if (typeof window.getDatasetColumn === 'function') {
+    return window.getDatasetColumn(dataset, ...candidates);
+  }
+  const columns = dataset?.columns;
+  if (!columns) return null;
+  for (const candidate of candidates) {
+    if (columns[candidate]) return columns[candidate];
+    const target = String(candidate).toLowerCase();
+    const match = Object.keys(columns).find(key => key.toLowerCase() === target);
+    if (match) return columns[match];
+  }
+  return null;
+}
+
+function collectColumnValues(column, metric, transform = null) {
+  if (!column?.length) return [];
+  const values = [];
+  for (let i = 0; i < column.length; i++) {
+    const source = column[i];
+    const value = transform ? transform(source) : source;
+    if (isValidMetricSample(metric, value)) values.push(value);
+  }
+  return values;
+}
+
 function collectFrametimeSeries(dataset) {
-  return dataset.rows
-    .map(r => getMetricValue(r, 'FrameTime'))
-    .filter(v => isValidMetricSample('FrameTime', v));
+  const source = window.getDatasetRenderedTimingSource?.(dataset);
+  if (source?.column) {
+    return collectColumnValues(source.column, 'FrameTime', source.toMilliseconds);
+  }
+  const column = getColumn(dataset, 'MsBetweenPresents', 'FrameTime');
+  if (column) return collectColumnValues(column, 'FrameTime');
+  return (dataset?.rows || [])
+    .map(row => getMetricValue(row, 'FrameTime'))
+    .filter(value => isValidMetricSample('FrameTime', value));
 }
 
 function collectDisplayedFrametimeSeries(dataset) {
-  return dataset.rows
-    .map(r => getMetricValue(r, 'DisplayedFrameTime'))
-    .filter(v => isValidMetricSample('DisplayedFrameTime', v));
+  const column = getColumn(
+    dataset,
+    'MsBetweenDisplayChange',
+    'MsBetweenDisplayChanges',
+    'DisplayedFrameTime'
+  );
+  if (column) return collectColumnValues(column, 'DisplayedFrameTime');
+  return (dataset?.rows || [])
+    .map(row => getMetricValue(row, 'DisplayedFrameTime'))
+    .filter(value => isValidMetricSample('DisplayedFrameTime', value));
 }
 
 function collectAggregateMetricSeries(dataset, metric) {
@@ -567,15 +606,63 @@ function collectAggregateMetricSeries(dataset, metric) {
 
 /**
  * Collects the numeric series used to compute stats for a metric on a dataset.
- * Timing metrics reject non-positive samples; all metrics reject NaN/Infinity.
+ * Columnar typed arrays are used directly so the application does not rebuild
+ * a JavaScript row object for every frame.
  */
 function collectMetricValues(dataset, metric) {
   if (AGGREGATE_FRAMETIME_METRICS.has(metric)) {
     return collectAggregateMetricSeries(dataset, metric);
   }
-  return dataset.rows
-    .map(r => getMetricValue(r, metric))
-    .filter(v => isValidMetricSample(metric, v));
+
+  if (metric === 'FrameTime') return collectFrametimeSeries(dataset);
+  if (metric === 'DisplayedFrameTime') return collectDisplayedFrametimeSeries(dataset);
+
+  if (metric === 'RenderedFPS' || metric === 'FPS') {
+    // The Present() cadence is authoritative for rendered/presented FPS.
+    // Generic captures containing only FPS retain the previous compatibility
+    // behavior without allocating a duplicate derived frame-time column.
+    const source = window.getDatasetRenderedTimingSource?.(dataset);
+    if (source?.column) {
+      return collectColumnValues(source.column, metric, value => {
+        const milliseconds = source.toMilliseconds(value);
+        return milliseconds > 0 ? 1000 / milliseconds : NaN;
+      });
+    }
+    const timing = getColumn(dataset, 'MsBetweenPresents', 'FrameTime');
+    if (timing) {
+      return collectColumnValues(timing, metric, value => value > 0 ? 1000 / value : NaN);
+    }
+    const direct = getColumn(dataset, metric, metric === 'FPS' ? 'RenderedFPS' : 'FPS');
+    return collectColumnValues(direct, metric);
+  }
+
+  if (metric === 'DisplayedFPS') {
+    // Displayed FPS must follow actual display changes. Never substitute
+    // rendered timing when display-change data is unavailable.
+    const timing = getColumn(dataset, 'MsBetweenDisplayChange', 'MsBetweenDisplayChanges');
+    if (timing) {
+      return collectColumnValues(timing, metric, value => value > 0 ? 1000 / value : NaN);
+    }
+    return collectColumnValues(getColumn(dataset, 'DisplayedFPS'), metric);
+  }
+
+  if (metric === 'MsGPUBusy') {
+    return collectColumnValues(getColumn(dataset, 'MsGPUBusy', 'GPUBusy', 'MsGpuBusy'), metric);
+  }
+  if (metric === 'MsUntilDisplayed') {
+    return collectColumnValues(
+      getColumn(dataset, 'MsUntilDisplayed', 'MsUntilDisplayComplete'),
+      metric
+    );
+  }
+
+  const direct = getColumn(dataset, metric);
+  if (direct) return collectColumnValues(direct, metric);
+
+  // Compatibility fallback for a legacy in-memory row dataset.
+  return (dataset?.rows || [])
+    .map(row => getMetricValue(row, metric))
+    .filter(value => isValidMetricSample(metric, value));
 }
 
 const PERCENT_AGGREGATE_METRICS = new Set([
@@ -1404,7 +1491,9 @@ function buildStatsJsonExport(state = latestStatsExportState) {
 
       return {
         name: entry.dataset.name,
-        rowCount: entry.dataset.rows.length,
+        rowCount: typeof window.getDatasetRowCount === 'function'
+          ? window.getDatasetRowCount(entry.dataset)
+          : entry.dataset.rows.length,
         stats,
         reliabilityDiagnostics: entry.reliabilityDiagnostics
       };
@@ -1428,7 +1517,7 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
   ];
 
   state.datasets.forEach(entry => {
-    lines.push(`- ${escapeMarkdown(entry.dataset.name)}: ${entry.dataset.rows.length.toLocaleString()} rows/frames`);
+    lines.push(`- ${escapeMarkdown(entry.dataset.name)}: ${(typeof window.getDatasetRowCount === 'function' ? window.getDatasetRowCount(entry.dataset) : entry.dataset.rows.length).toLocaleString()} rows/frames`);
   });
 
   lines.push('', '## Statistics');
