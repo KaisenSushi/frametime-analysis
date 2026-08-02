@@ -10,7 +10,6 @@
   let vizStepAdvanceWired = false;
   let statsStepAdvanceWired = false;
   let reliabilityStepAdvanceWired = false;
-  let backWired = false;
 
   function getActiveV2Mode() {
     return document.querySelector('.v2-mode:not(.hidden)')?.getAttribute('data-mode') || null;
@@ -311,28 +310,11 @@
     });
   }
 
-  function wireBackToSetup() {
-    if (backWired) return;
-    backWired = true;
-
-    [
-      ['vizBackToSetup', 'visualization'],
-      ['statsBackToSetup', 'statistics'],
-      ['reliabilityBackToSetup', 'reliability']
-    ].forEach(([id, mode]) => {
-      document.getElementById(id)?.addEventListener('click', () => {
-        setMode(mode);
-        setStep('setup', { focusPanel: true });
-      });
-    });
-  }
-
   function init() {
     wireShell();
     wireAddToChartStepAdvance();
     wireCalculateStatsStepAdvance();
     wireUpdateReliabilityStepAdvance();
-    wireBackToSetup();
     setMode('visualization');
     setStep('setup');
   }

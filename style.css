@@ -2155,20 +2155,6 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   box-sizing: border-box;
 }
 
-#appShellV2 .v2-back-setup {
-  margin-bottom: 12px;
-  color: var(--v2-link);
-  font-size: 13px;
-  font-weight: 400;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-#appShellV2 .v2-back-setup:hover {
-  color: var(--v2-ink);
-  text-decoration: underline;
-}
-
 /* ----- Type ----- */
 
 #appShellV2 .workbench-head h1 {
@@ -3426,22 +3412,30 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
 /* ----- Appearance control ----- */
 #appShellV2 .theme-control {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
   min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
 }
 
 #appShellV2 .theme-control-label {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
   color: var(--v2-muted);
   font-size: 12px;
-  line-height: 1;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
 #appShellV2 .theme-select {
+  display: inline-block;
   width: auto;
   min-width: 116px;
+  height: 30px;
   min-height: 30px;
+  margin: 0;
   padding: 4px 28px 4px 8px;
   border: 1px solid var(--v2-border);
   border-radius: var(--v2-radius-sm);
@@ -3449,7 +3443,20 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   color: var(--v2-text);
   font: inherit;
   font-size: 12px;
+  line-height: 20px;
+  vertical-align: middle;
   cursor: pointer;
+}
+
+#appShellV2 .v2-topbar-actions > .advanced-metrics-toggle {
+  min-height: 30px;
+  margin: 0;
+}
+
+#appShellV2 .v2-topbar-actions > .v2-topbar-link {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
 }
 
 #appShellV2 .theme-select:hover {

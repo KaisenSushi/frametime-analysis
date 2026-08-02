@@ -56,13 +56,3 @@
   display: block;
 }
 
-.v2-back-setup {
-  display: inline-block;
-  margin-bottom: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
