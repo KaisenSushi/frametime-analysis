@@ -2,6 +2,44 @@
 window.allDatasets = [];
 window.nextDatasetId = window.nextDatasetId || 1;
 
+function compactDatasetDisplayName(value, maxLength = 64) {
+  const text = String(value ?? '').trim();
+  if (text.length <= maxLength) return text;
+  const left = Math.ceil((maxLength - 1) * 0.62);
+  const right = Math.max(8, maxLength - left - 1);
+  return `${text.slice(0, left)}…${text.slice(-right)}`;
+}
+
+function makeDefaultDatasetDisplayName(fileName) {
+  const raw = String(fileName ?? '').trim();
+  const withoutExtension = raw.replace(/\.(csv|txt|json)$/i, '');
+  const frameViewMarker = withoutExtension.search(/\s+(?:--|—|–)\s*FrameView[_-]/i);
+  if (frameViewMarker >= 4) {
+    return compactDatasetDisplayName(
+      withoutExtension.slice(0, frameViewMarker).replace(/\s+(?:--|—|–)\s*$/, '').trim()
+    );
+  }
+  return compactDatasetDisplayName(withoutExtension.replace(/_Log$/i, '').trim());
+}
+
+function getDatasetDisplayName(dataset) {
+  const alias = String(dataset?.displayName ?? '').trim();
+  return alias || String(dataset?.name ?? 'Dataset');
+}
+
+function setDatasetDisplayName(dataset, value) {
+  if (!dataset) return '';
+  const next = compactDatasetDisplayName(String(value ?? '').trim() || makeDefaultDatasetDisplayName(dataset.name));
+  dataset.displayName = next;
+  dataset._seriesCache = null;
+  dataset._pointCache = null;
+  return next;
+}
+
+window.makeDefaultDatasetDisplayName = makeDefaultDatasetDisplayName;
+window.getDatasetDisplayName = getDatasetDisplayName;
+window.setDatasetDisplayName = setDatasetDisplayName;
+
 /**
  * Resolve a stable dataset ID to its current array position. UI controls store
  * IDs so removing another dataset cannot silently change their selection.
@@ -1274,18 +1312,22 @@ async function handleFileUpload(e) {
           rowCount: parsed.rowCount
         });
 
+        const existingDataset = duplicate.action === 'replace'
+          ? window.allDatasets[duplicate.existingIndex]
+          : null;
         const datasetObj = attachDatasetCompatibility({
           id: duplicate.action === 'replace'
-            ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
+            ? (existingDataset?.id ?? window.nextDatasetId++)
             : window.nextDatasetId++,
           name: duplicate.name,
+          displayName: existingDataset?.displayName || makeDefaultDatasetDisplayName(duplicate.name),
           columns: parsed.columns,
           rowCount: parsed.rowCount,
           source: parsed.metadata || null
         });
 
         if (duplicate.action === 'replace') {
-          const existing = window.allDatasets[duplicate.existingIndex];
+          const existing = existingDataset;
           if (existing?.color) datasetObj.color = existing.color;
           window.allDatasets[duplicate.existingIndex] = datasetObj;
           replacedCount++;
@@ -1373,7 +1415,7 @@ function removeUploadedDataset(index) {
   refreshDatasetLists();
 
   if (removed && typeof window.notify === 'function') {
-    window.notify(`Removed "${removed.name}".`, 'info');
+    window.notify(`Removed "${getDatasetDisplayName(removed)}".`, 'info');
   }
 }
 
@@ -1396,15 +1438,70 @@ function refreshDatasetLists() {
 
       const label = document.createElement('span');
       label.className = 'dataset-list-name';
-      label.textContent = `${ds.name} (${getDatasetRowCount(ds)} rows)`;
+      label.textContent = `${getDatasetDisplayName(ds)} (${getDatasetRowCount(ds)} rows)`;
+      label.title = ds.name;
+      label.tabIndex = 0;
+      label.setAttribute('role', 'button');
+      label.setAttribute('aria-label', `Rename ${getDatasetDisplayName(ds)}`);
+      label.setAttribute('aria-describedby', `dataset-original-${ds.id}`);
       li.appendChild(label);
+
+      const original = document.createElement('span');
+      original.id = `dataset-original-${ds.id}`;
+      original.className = 'sr-only';
+      original.textContent = `Original filename: ${ds.name}`;
+      li.appendChild(original);
+
+      const beginRename = () => {
+        if (li.querySelector('.dataset-alias-input')) return;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'dataset-alias-input';
+        input.value = getDatasetDisplayName(ds);
+        input.maxLength = 64;
+        input.setAttribute('aria-label', `Short display name for ${ds.name}`);
+        label.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let finished = false;
+        const finish = (save) => {
+          if (finished) return;
+          finished = true;
+          if (save) setDatasetDisplayName(ds, input.value);
+          refreshDatasetLists();
+          window.refreshDatasetDisplayNames?.();
+          window.resetStatsPanel?.();
+          window.markReliabilityStale?.('Dataset names changed. Update reliability to refresh the results.');
+        };
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+          if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+        });
+        input.addEventListener('blur', () => finish(true), { once: true });
+      };
+      label.addEventListener('click', beginRename);
+      label.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          beginRename();
+        }
+      });
+
+      const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
+      renameBtn.className = 'dataset-rename-btn';
+      renameBtn.textContent = 'Rename';
+      renameBtn.setAttribute('aria-label', `Rename ${getDatasetDisplayName(ds)}`);
+      renameBtn.addEventListener('click', beginRename);
+      li.appendChild(renameBtn);
 
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'dataset-remove-btn';
       removeBtn.textContent = '\u00d7';
-      removeBtn.title = `Remove ${ds.name}`;
-      removeBtn.setAttribute('aria-label', `Remove ${ds.name}`);
+      removeBtn.title = `Remove ${getDatasetDisplayName(ds)}`;
+      removeBtn.setAttribute('aria-label', `Remove ${getDatasetDisplayName(ds)}`);
       removeBtn.addEventListener('click', () => removeUploadedDataset(index));
       li.appendChild(removeBtn);
 

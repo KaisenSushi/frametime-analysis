@@ -1,3 +1,7 @@
+function getStatsDatasetLabel(dataset) {
+  return window.getDatasetDisplayName?.(dataset) || dataset?.displayName || dataset?.name || 'Dataset';
+}
+
 /**
  * Retrieves the numeric value of a given metric from a row object.
  * Supports both standard metrics and PresentMon-style CSV formats.
@@ -1335,7 +1339,7 @@ async function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTim
 
     const header = makeDiagnosticsElement('header', 'stats-diagnostics-card-header');
     header.append(
-      makeDiagnosticsElement('h3', '', dataset.name),
+      makeDiagnosticsElement('h3', '', getStatsDatasetLabel(dataset)),
       makeDiagnosticsElement('span', 'stats-frame-count', `${series.length.toLocaleString()} samples`)
     );
     card.appendChild(header);
@@ -1490,7 +1494,7 @@ function buildStatsJsonExport(state = latestStatsExportState) {
       });
 
       return {
-        name: entry.dataset.name,
+        name: getStatsDatasetLabel(entry.dataset),
         rowCount: typeof window.getDatasetRowCount === 'function'
           ? window.getDatasetRowCount(entry.dataset)
           : entry.dataset.rows.length,
@@ -1517,11 +1521,11 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
   ];
 
   state.datasets.forEach(entry => {
-    lines.push(`- ${escapeMarkdown(entry.dataset.name)}: ${(typeof window.getDatasetRowCount === 'function' ? window.getDatasetRowCount(entry.dataset) : entry.dataset.rows.length).toLocaleString()} rows/frames`);
+    lines.push(`- ${escapeMarkdown(getStatsDatasetLabel(entry.dataset))}: ${(typeof window.getDatasetRowCount === 'function' ? window.getDatasetRowCount(entry.dataset) : entry.dataset.rows.length).toLocaleString()} rows/frames`);
   });
 
   lines.push('', '## Statistics');
-  const headers = ['Metric', ...state.datasets.map(entry => escapeMarkdown(entry.dataset.name))];
+  const headers = ['Metric', ...state.datasets.map(entry => escapeMarkdown(getStatsDatasetLabel(entry.dataset)))];
   lines.push(`| ${headers.join(' | ')} |`);
   lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
 
@@ -1573,7 +1577,7 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
     const lag1 = diagnostics.lagOneAutocorrelationCoefficient;
     const lagText = Number.isFinite(lag1) ? lag1.toFixed(3) : 'N/A';
     lines.push(
-      `- **${escapeMarkdown(entry.dataset.name)}:** ${diagnostics.validSampleCount.toLocaleString()} valid ${escapeMarkdown(diagnostics.basedOnMetric)} samples; lag-1 autocorrelation ${lagText}. ${escapeMarkdown(diagnostics.autocorrelationInterpretation)}`
+      `- **${escapeMarkdown(getStatsDatasetLabel(entry.dataset))}:** ${diagnostics.validSampleCount.toLocaleString()} valid ${escapeMarkdown(diagnostics.basedOnMetric)} samples; lag-1 autocorrelation ${lagText}. ${escapeMarkdown(diagnostics.autocorrelationInterpretation)}`
     );
 
     Object.entries(diagnostics.percentileSampleSupport).forEach(([label, support]) => {
@@ -1898,7 +1902,7 @@ async function updateStatsTableCore(calculationToken = statsCalculationToken) {
       const datasetStats = selectedDatasets.map((dataset, dsIdx) => {
         const values = cachedCollect(dataset, metric);
         return {
-          name: dataset.name,
+          name: getStatsDatasetLabel(dataset),
           color: getStatsDatasetColor(dataset, dsIdx),
           stats: statisticsResultMap.get(cacheKey(dataset, metric)) || calculateStatistics(values, metric)
         };

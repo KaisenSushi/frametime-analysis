@@ -3910,3 +3910,234 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
 #appShellV2 .stats-aggregate-table td {
   padding-block: 9px;
 }
+
+/* =============================================================================
+   Analysis board phase 1: editable dataset aliases + fixed overview board
+   ============================================================================= */
+
+#appShellV2 .dataset-list-name[role="button"] {
+  cursor: text;
+}
+
+#appShellV2 .dataset-list-name[role="button"]:hover {
+  color: var(--v2-ink);
+}
+
+#appShellV2 .dataset-rename-btn {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--v2-link);
+  padding: 4px 6px;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#appShellV2 .dataset-rename-btn:hover {
+  color: var(--v2-ink);
+}
+
+#appShellV2 .dataset-alias-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 30px;
+  padding: 4px 7px;
+  border: 1px solid var(--v2-accent-muted);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-field);
+  color: var(--v2-ink);
+  font: inherit;
+}
+
+#appShellV2 #singleChartBuilderControls {
+  display: contents;
+}
+
+#appShellV2 .analysis-board-setup-hint {
+  margin: 2px 0 0;
+  padding: 9px 10px;
+  border: 1px solid var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-field);
+  color: var(--v2-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#appShellV2 .analysis-board {
+  width: 100%;
+  min-width: 0;
+}
+
+#appShellV2 .analysis-board-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--v2-border-subtle);
+}
+
+#appShellV2 .analysis-board-head h2 {
+  margin: 0;
+  color: var(--v2-ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#appShellV2 .analysis-board-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-field);
+}
+
+#appShellV2 .analysis-board-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: min(360px, 46vw);
+  color: var(--v2-text);
+  font-size: 12px;
+}
+
+#appShellV2 .analysis-board-legend-item > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#appShellV2 .analysis-board-legend-dot,
+#appShellV2 .analysis-board-table-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+#appShellV2 .analysis-board-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#appShellV2 .analysis-board-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-chart);
+}
+
+#appShellV2 .analysis-board-card h3 {
+  margin: 0;
+  color: var(--v2-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#appShellV2 .analysis-board-card > p {
+  margin: 3px 0 10px;
+  color: var(--v2-muted);
+  font-size: 11px;
+}
+
+#appShellV2 .analysis-board-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: clamp(260px, 31vh, 390px);
+  min-height: 250px;
+}
+
+#appShellV2 .analysis-board-canvas-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+}
+
+#appShellV2 .analysis-board-table-wrap {
+  width: 100%;
+  margin-top: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+}
+
+#appShellV2 .analysis-board-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  background: var(--v2-chart);
+  color: var(--v2-text);
+  font-size: 12px;
+}
+
+#appShellV2 .analysis-board-table caption {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--v2-border-subtle);
+  color: var(--v2-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+#appShellV2 .analysis-board-table th,
+#appShellV2 .analysis-board-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--v2-border-subtle);
+  text-align: right;
+  white-space: nowrap;
+}
+
+#appShellV2 .analysis-board-table thead th {
+  color: var(--v2-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#appShellV2 .analysis-board-table th:first-child,
+#appShellV2 .analysis-board-table td:first-child {
+  text-align: left;
+}
+
+#appShellV2 .analysis-board-table tbody th {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 360px;
+  overflow: hidden;
+  color: var(--v2-ink);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+#appShellV2 .analysis-board-table tbody th > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#appShellV2 .analysis-board-table tbody tr:last-child th,
+#appShellV2 .analysis-board-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 1180px) {
+  #appShellV2 .analysis-board-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #appShellV2 .analysis-board-canvas-wrap {
+    height: clamp(280px, 42vh, 430px);
+  }
+}

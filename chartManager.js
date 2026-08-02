@@ -30,6 +30,10 @@ const CHART_THEME_FALLBACKS = Object.freeze({
   zoomBorder: 'rgba(255,255,255,0.35)'
 });
 
+function getDatasetLabel(dataset) {
+  return window.getDatasetDisplayName?.(dataset) || dataset?.displayName || dataset?.name || 'Dataset';
+}
+
 function compactDatasetLabel(value, maxLength = 52) {
   const text = String(value ?? '');
   if (text.length <= maxLength) return text;
@@ -82,6 +86,10 @@ function assignDatasetColors() {
  * color change shows immediately without Clear / re-add.
  */
 function syncLiveChartColors() {
+  if (window.analysisBoardReady && analysisBoardDatasetIndices.length) {
+    buildAnalysisBoard(analysisBoardDatasetIndices, { silent: true });
+    return true;
+  }
   if (!Array.isArray(window.chartDatasets) || !window.chartDatasets.length) return false;
 
   let changed = false;
@@ -227,7 +235,7 @@ function getStatsSeriesForChart(dataset, metric) {
 }
 
 function buildSummaryBarChart(indices, metric, statKeys) {
-  const labels = indices.map(i => window.allDatasets[i].name);
+  const labels = indices.map(i => getDatasetLabel(window.allDatasets[i]));
   const benchStats = indices.map(i => {
     const ds = window.allDatasets[i];
     const values = getStatsSeriesForChart(ds, metric);
@@ -573,7 +581,7 @@ function rebuildCurrentHistogramDatasets() {
     const displayCounts = histogramCountsForDisplay(bins.counts, asPercent);
     const seriesColor = ds.color || getBenchmarkColor(idx);
     return {
-      label: ds.name,
+      label: getDatasetLabel(ds),
       data: displayCounts.map((c, i) => ({ x: bins.labels[i], y: c })),
       type: 'bar',
       backgroundColor: hexToRgba(seriesColor, 0.7),
@@ -1063,6 +1071,384 @@ function updateChartStatusLine() {
 }
 
 
+let visualizationResultMode = 'single';
+let analysisBoardCharts = [];
+let analysisBoardDatasetIndices = [];
+window.analysisBoardReady = false;
+
+function destroyAnalysisBoard() {
+  analysisBoardCharts.forEach(chart => {
+    try { chart?.destroy?.(); } catch (error) { console.warn('Board chart cleanup failed:', error); }
+  });
+  analysisBoardCharts = [];
+  analysisBoardDatasetIndices = [];
+  window.analysisBoardReady = false;
+  const legend = document.getElementById('analysisBoardLegend');
+  const body = document.getElementById('analysisBoardStatsBody');
+  const status = document.getElementById('analysisBoardStatus');
+  if (legend) legend.innerHTML = '';
+  if (body) body.innerHTML = '';
+  if (status) status.textContent = '';
+}
+
+function syncVisualizationResultUi(mode = visualizationResultMode) {
+  const boardMode = mode === 'board';
+  const board = document.getElementById('analysisBoard');
+  const chartContainer = document.getElementById('chartContainer');
+  const orderList = document.getElementById('datasetOrderList');
+  const resetButton = document.getElementById('resetZoomBtn');
+  const exportButton = document.getElementById('exportChartPngBtn');
+  const heightControl = document.querySelector('.chart-height-control');
+  const hint = document.getElementById('vizChartHint');
+
+  board?.classList.toggle('hidden', !boardMode || !window.analysisBoardReady);
+  chartContainer?.classList.toggle('hidden', boardMode);
+  orderList?.classList.toggle('hidden', boardMode);
+  resetButton?.classList.toggle('hidden', boardMode);
+  exportButton?.classList.toggle('hidden', boardMode);
+  heightControl?.classList.toggle('hidden', boardMode);
+  if (hint) {
+    hint.textContent = boardMode
+      ? 'The board uses the selected datasets and keeps one shared color legend across all four views.'
+      : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.';
+  }
+}
+
+function setVisualizationResultMode(mode) {
+  const next = mode === 'board' ? 'board' : 'single';
+  if (visualizationResultMode === next) {
+    syncVisualizationResultUi(next);
+    return;
+  }
+  visualizationResultMode = next;
+  clearChart();
+  syncVisualizationResultUi(next);
+}
+
+function makeBoardLinearAxis(title, { beginAtZero = false, grid = true } = {}) {
+  const theme = getChartThemeColors();
+  return {
+    type: 'linear',
+    beginAtZero,
+    title: { display: Boolean(title), text: title, color: theme.text },
+    ticks: { color: theme.text, maxTicksLimit: 8 },
+    grid: { display: grid, color: theme.grid },
+    border: { color: theme.border }
+  };
+}
+
+function makeBoardCategoryAxis(title = '') {
+  const theme = getChartThemeColors();
+  return {
+    type: 'category',
+    title: { display: Boolean(title), text: title, color: theme.text },
+    ticks: { color: theme.text, autoSkip: false, callback(value) {
+      return compactDatasetLabel(this.getLabelForValue(value), 28);
+    } },
+    grid: { display: false },
+    border: { color: theme.border }
+  };
+}
+
+function makeBoardOptions(scales, extra = {}) {
+  const theme = getChartThemeColors();
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    normalized: true,
+    parsing: false,
+    interaction: { mode: 'nearest', intersect: false },
+    scales,
+    plugins: {
+      legend: { display: false, labels: { color: theme.text } },
+      tooltip: { enabled: false },
+      zoom: false
+    },
+    elements: {
+      line: { borderWidth: 1.5, tension: 0 },
+      point: { radius: 0, hitRadius: 3 },
+      bar: { borderRadius: 5, borderSkipped: false }
+    },
+    ...extra
+  };
+}
+
+function createAnalysisBoardChart(canvasId, config) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const existing = window.Chart?.getChart?.(canvas);
+  existing?.destroy?.();
+  const chart = new Chart(canvas.getContext('2d'), config);
+  analysisBoardCharts.push(chart);
+  return chart;
+}
+
+function buildBoardLegend(indices) {
+  const legend = document.getElementById('analysisBoardLegend');
+  if (!legend) return;
+  legend.innerHTML = '';
+  indices.forEach(index => {
+    const dataset = window.allDatasets[index];
+    const item = document.createElement('span');
+    item.className = 'analysis-board-legend-item';
+    item.title = dataset?.name || '';
+    const dot = document.createElement('span');
+    dot.className = 'analysis-board-legend-dot';
+    dot.style.backgroundColor = dataset?.color || getBenchmarkColor(index);
+    dot.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.textContent = getDatasetLabel(dataset);
+    item.append(dot, name);
+    legend.appendChild(item);
+  });
+}
+
+function buildBoardStatsTable(entries) {
+  const body = document.getElementById('analysisBoardStatsBody');
+  if (!body) return;
+  body.innerHTML = '';
+  entries.forEach(entry => {
+    const row = document.createElement('tr');
+    const nameCell = document.createElement('th');
+    nameCell.scope = 'row';
+    nameCell.title = entry.dataset.name;
+    const dot = document.createElement('span');
+    dot.className = 'analysis-board-table-dot';
+    dot.style.backgroundColor = entry.color;
+    dot.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.textContent = entry.label;
+    nameCell.append(dot, name);
+    row.appendChild(nameCell);
+
+    const values = [
+      window.formatStatValue?.('RenderedFPS', 'avg', entry.stats.avg) ?? entry.stats.avg?.toFixed?.(2),
+      window.formatStatValue?.('RenderedFPS', 'low1', entry.stats.low1) ?? entry.stats.low1?.toFixed?.(2),
+      window.formatStatValue?.('RenderedFPS', 'low01', entry.stats.low01) ?? entry.stats.low01?.toFixed?.(2),
+      window.formatStatValue?.('RenderedFPS', 'stdev', entry.stats.stdev) ?? entry.stats.stdev?.toFixed?.(2),
+      entry.fpsValues.length.toLocaleString()
+    ];
+    values.forEach(value => {
+      const cell = document.createElement('td');
+      cell.textContent = value || 'N/A';
+      row.appendChild(cell);
+    });
+    body.appendChild(row);
+  });
+}
+
+function buildAnalysisBoard(indices, { silent = false } = {}) {
+  destroyAnalysisBoard();
+  if (window.mainChart) {
+    window.mainChart.destroy();
+    window.mainChart = null;
+  }
+  window.chartDatasets.length = 0;
+  window.chartLabels = [];
+  document.getElementById('datasetOrderList')?.replaceChildren();
+  setResetZoomEnabled(false);
+  visualizationResultMode = 'board';
+  window.assignDatasetColors?.();
+
+  const entries = indices.map(index => {
+    const dataset = window.allDatasets[index];
+    const fpsValues = getMetricSeries(dataset, 'RenderedFPS');
+    const frameValues = typeof window.collectMetricValues === 'function'
+      ? window.collectMetricValues(dataset, 'FrameTime')
+      : [];
+    if (!fpsValues.length || !frameValues.length) return null;
+    return {
+      index,
+      dataset,
+      label: getDatasetLabel(dataset),
+      color: dataset.color || getBenchmarkColor(index),
+      fpsValues,
+      frameValues,
+      stats: window.calculateStatistics(fpsValues, 'RenderedFPS')
+    };
+  }).filter(Boolean);
+
+  if (!entries.length) {
+    syncVisualizationResultUi('board');
+    if (!silent) window.notify?.('The selected datasets do not contain usable rendered timing data.', 'warning');
+    return false;
+  }
+
+  analysisBoardDatasetIndices = entries.map(entry => entry.index);
+  buildBoardLegend(analysisBoardDatasetIndices);
+
+  const frameDatasets = entries.map(entry => {
+    const indicesToPlot = sampleIndices(entry.frameValues.length, 2200);
+    const points = [];
+    let elapsedMs = 0;
+    let plotCursor = 0;
+    for (let index = 0; index < entry.frameValues.length; index++) {
+      elapsedMs += entry.frameValues[index];
+      if (plotCursor < indicesToPlot.length && index === indicesToPlot[plotCursor]) {
+        points.push({ x: elapsedMs / 1000, y: entry.frameValues[index] });
+        plotCursor++;
+      }
+    }
+    return {
+      label: entry.label,
+      data: points,
+      borderColor: entry.color,
+      backgroundColor: entry.color,
+      pointRadius: 0,
+      spanGaps: true,
+      showLine: true
+    };
+  });
+  createAnalysisBoardChart('analysisFrameTimeChart', {
+    type: 'line',
+    data: { datasets: frameDatasets },
+    options: makeBoardOptions({
+      x: makeBoardLinearAxis('Elapsed time (s)', { grid: false }),
+      y: makeBoardLinearAxis('Rendered frame time (ms)')
+    })
+  });
+
+  const percentileDatasets = entries.map(entry => {
+    const sorted = entry.fpsValues.slice().sort((a, b) => a - b);
+    const plotIndices = sampleIndices(sorted.length, 1200);
+    return {
+      label: entry.label,
+      data: plotIndices.map(index => ({
+        x: sorted.length <= 1 ? 100 : index * 100 / (sorted.length - 1),
+        y: sorted[index]
+      })),
+      borderColor: entry.color,
+      backgroundColor: entry.color,
+      pointRadius: 0,
+      showLine: true
+    };
+  });
+  createAnalysisBoardChart('analysisPercentileChart', {
+    type: 'line',
+    data: { datasets: percentileDatasets },
+    options: makeBoardOptions({
+      x: { ...makeBoardLinearAxis('Percentile', { grid: false }), min: 0, max: 100, ticks: { ...makeBoardLinearAxis('').ticks, callback: value => `${value}%` } },
+      y: makeBoardLinearAxis('Rendered FPS')
+    })
+  });
+
+  try {
+    createAnalysisBoardChart('analysisBoxChart', {
+      type: 'boxplot',
+      data: {
+        labels: entries.map(entry => entry.label),
+        datasets: [{
+          label: 'Rendered FPS',
+          data: entries.map(entry => sampleSeries(entry.fpsValues, MAX_DISTRIBUTION_POINTS)),
+          backgroundColor: entries.map(entry => hexToRgba(entry.color, 0.45)),
+          borderColor: entries.map(entry => entry.color),
+          borderWidth: 1.5
+        }]
+      },
+      options: makeBoardOptions({
+        x: makeBoardLinearAxis('Rendered FPS'),
+        y: makeBoardCategoryAxis('Dataset')
+      }, { indexAxis: 'y', parsing: true })
+    });
+  } catch (error) {
+    console.error('Analysis-board box plot failed:', error);
+    const canvas = document.getElementById('analysisBoxChart');
+    canvas?.setAttribute('aria-label', 'Box plot unavailable because the chart extension failed to load.');
+  }
+
+  const summaryLabels = ['Average FPS', 'Worst 1% mean', 'Worst 0.1% mean'];
+  createAnalysisBoardChart('analysisSummaryChart', {
+    type: 'bar',
+    data: {
+      labels: summaryLabels,
+      datasets: entries.map(entry => ({
+        label: entry.label,
+        data: [entry.stats.avg, entry.stats.low1, entry.stats.low01],
+        backgroundColor: hexToRgba(entry.color, 0.78),
+        borderColor: entry.color,
+        borderWidth: 1
+      }))
+    },
+    options: makeBoardOptions({
+      x: makeBoardLinearAxis('Rendered FPS', { beginAtZero: true }),
+      y: makeBoardCategoryAxis('Statistic')
+    }, { indexAxis: 'y', parsing: true })
+  });
+
+  buildBoardStatsTable(entries);
+  const status = document.getElementById('analysisBoardStatus');
+  if (status) {
+    const frames = entries.reduce((sum, entry) => sum + entry.fpsValues.length, 0);
+    status.textContent = `${entries.length} dataset${entries.length === 1 ? '' : 's'} · ${frames.toLocaleString()} valid rendered frames`;
+  }
+
+  window.currentChartType = 'analysisboard';
+  window.currentChartMetric = 'RenderedFPS';
+  window.analysisBoardReady = true;
+  const clearButton = document.getElementById('clearChartBtn');
+  if (clearButton) clearButton.disabled = false;
+  syncVisualizationResultUi('board');
+  return true;
+}
+
+function resizeAnalysisBoardCharts() {
+  if (!window.analysisBoardReady) return;
+  analysisBoardCharts.forEach(chart => {
+    try {
+      chart.resize?.();
+      chart.update?.('none');
+    } catch (error) {
+      console.warn('Analysis-board resize failed:', error);
+    }
+  });
+}
+
+function refreshAnalysisBoardTheme() {
+  if (!window.analysisBoardReady) return;
+  const theme = getChartThemeColors();
+  analysisBoardCharts.forEach(chart => {
+    Object.values(chart.options.scales || {}).forEach(scale => {
+      if (scale.title) scale.title.color = theme.text;
+      if (scale.ticks) scale.ticks.color = theme.text;
+      if (scale.grid?.display !== false) scale.grid.color = theme.grid;
+      if (scale.border) scale.border.color = theme.border;
+    });
+    if (chart.options.plugins?.legend?.labels) chart.options.plugins.legend.labels.color = theme.text;
+    chart.update('none');
+  });
+}
+
+function refreshDatasetDisplayNames() {
+  const displayForIndex = index => getDatasetLabel(window.allDatasets?.[index]);
+  (window.chartDatasets || []).forEach(dataset => {
+    if (Number.isInteger(dataset.sourceDatasetIndex)) {
+      const label = displayForIndex(dataset.sourceDatasetIndex);
+      dataset.label = dataset.qqRole === 'reference' ? `${label} (normal ref.)` : label;
+    }
+  });
+  const distributionIndices = getDistributionChartIndices();
+  if (distributionIndices.length) {
+    window.chartLabels = distributionIndices.map(displayForIndex);
+    if (window.mainChart) window.mainChart.data.labels = window.chartLabels.slice();
+  }
+  if (window.currentChartType === 'summarybar') {
+    const indices = typeof window.getDatasetPickerIndices === 'function'
+      ? window.getDatasetPickerIndices('datasetSelect')
+      : [];
+    window.chartLabels = indices.map(displayForIndex);
+    if (window.mainChart) window.mainChart.data.labels = window.chartLabels.slice();
+  }
+  if (window.mainChart) {
+    window.mainChart.data.datasets = window.chartDatasets.slice();
+    window.mainChart.update('none');
+    updateDatasetOrder();
+  }
+  if (window.analysisBoardReady && analysisBoardDatasetIndices.length) {
+    buildAnalysisBoard(analysisBoardDatasetIndices, { silent: true });
+  }
+}
+
 let chartOpGeneration = 0;
 
 /**
@@ -1070,6 +1456,7 @@ let chartOpGeneration = 0;
  */
 function clearChart() {
   chartOpGeneration++;
+  destroyAnalysisBoard();
   window.currentChartType = null;
   window.currentChartMetric = '';
   window.chartLabels = [];
@@ -1101,6 +1488,7 @@ function clearChart() {
   document.getElementById('mainChart')?.setAttribute('aria-hidden', 'true');
   document.getElementById('mainChart')
     ?.setAttribute('aria-label', 'Frame timing chart. Select datasets, then add them to the chart.');
+  syncVisualizationResultUi(visualizationResultMode);
 }
 
 function resetChartZoom() {
@@ -1166,7 +1554,7 @@ function mergeDistributionIndices(existing, toAdd) {
 }
 
 function rebuildDistributionChart(indices, metric, chartType) {
-  const labels = indices.map(i => window.allDatasets[i].name);
+  const labels = indices.map(i => getDatasetLabel(window.allDatasets[i]));
   const fullGroups = indices.map(i => getMetricSeries(window.allDatasets[i], metric));
   const densityGroups = fullGroups.map(values =>
     sampleSeries(values, MAX_DISTRIBUTION_POINTS)
@@ -1243,7 +1631,7 @@ function getChartOrderEntries(qqPairsCache = null) {
       kind: 'distribution',
       orderIndex,
       datasetIndex,
-      label: window.allDatasets[datasetIndex]?.name || `Dataset ${datasetIndex + 1}`
+      label: getDatasetLabel(window.allDatasets[datasetIndex]) || `Dataset ${datasetIndex + 1}`
     }));
   }
 
@@ -1477,7 +1865,7 @@ function addToChartCore(generation) {
       const seriesColor = ds.color || getBenchmarkColor(idx);
 
       cfg = {
-        label: ds.name,
+        label: getDatasetLabel(ds),
         data: points,
         totalPoints,
         displayedPoints,
@@ -1496,14 +1884,14 @@ function addToChartCore(generation) {
     } else if (chartType === 'qqplot') {
       const qqResult = buildQQPlot(vals);
       if (!qqResult) {
-        window.notify?.(`${ds.name}: need at least 2 valid values for a Q-Q plot.`, 'warning');
+        window.notify?.(`${getDatasetLabel(ds)}: need at least 2 valid values for a Q-Q plot.`, 'warning');
         return;
       }
 
       const seriesColor = ds.color || getBenchmarkColor(idx);
 
       window.chartDatasets.push({
-        label: ds.name,
+        label: getDatasetLabel(ds),
         type: 'scatter',
         data: qqResult.points,
         borderColor: seriesColor,
@@ -1521,7 +1909,7 @@ function addToChartCore(generation) {
       });
 
       cfg = {
-        label: `${ds.name} (normal ref.)`,
+        label: `${getDatasetLabel(ds)} (normal ref.)`,
         type: 'scatter',
         data: qqResult.refLine,
         borderColor: hexToRgba(seriesColor, 0.9),
@@ -1572,7 +1960,21 @@ function addToChart() {
     setTimeout(() => {
       try {
         if (generation !== chartOpGeneration) return;
-        addToChartCore(generation);
+        const resultMode = document.getElementById('vizResultMode')?.value || visualizationResultMode;
+        if (resultMode === 'board') {
+          const indices = typeof window.getDatasetPickerIndices === 'function'
+            ? window.getDatasetPickerIndices('datasetSelect')
+            : [];
+          if (!indices.length) {
+            window.notify?.('Select at least one dataset before building the analysis board.', 'warning');
+            return;
+          }
+          buildAnalysisBoard(indices);
+        } else {
+          visualizationResultMode = 'single';
+          syncVisualizationResultUi('single');
+          addToChartCore(generation);
+        }
       } catch (err) {
         console.error('Add to chart failed:', err);
         window.notify?.(`Failed to add chart: ${err.message}`, 'error');
@@ -1797,7 +2199,10 @@ window.setResetZoomEnabled = setResetZoomEnabled;
 function refreshChartTheme() {
   initChartDefaults();
   const chart = window.mainChart;
-  if (!chart) return;
+  if (!chart) {
+    refreshAnalysisBoardTheme();
+    return;
+  }
 
   const theme = getChartThemeColors();
   chart.options.scales = buildChartScales(window.currentChartType);
@@ -1811,9 +2216,15 @@ function refreshChartTheme() {
     chart.options.plugins.legend.labels.color = theme.text;
   }
   chart.update('none');
+  refreshAnalysisBoardTheme();
 }
 
 window.getChartThemeColors = getChartThemeColors;
 window.refreshChartTheme = refreshChartTheme;
 
 window.exportChartPng = exportChartPng;
+window.setVisualizationResultMode = setVisualizationResultMode;
+window.buildAnalysisBoard = buildAnalysisBoard;
+window.refreshDatasetDisplayNames = refreshDatasetDisplayNames;
+window.refreshAnalysisBoardTheme = refreshAnalysisBoardTheme;
+window.resizeAnalysisBoardCharts = resizeAnalysisBoardCharts;

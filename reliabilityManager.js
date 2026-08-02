@@ -1,4 +1,8 @@
 let reliabilityChart = null;
+
+function getReliabilityDatasetLabel(dataset) {
+  return window.getDatasetDisplayName?.(dataset) || dataset?.displayName || dataset?.name || 'Dataset';
+}
 let reliabilityRenderToken = 0;
 let reliabilityWorker = null;
 let reliabilityWorkerUrl = null;
@@ -227,12 +231,12 @@ function renderReliabilityCdfResults(datasets, metric, cdfResults) {
     const key = String(dataset.id ?? index);
     const cdf = byKey.get(key) || [];
     if (!cdf.length) {
-      skipped.push(dataset.name);
+      skipped.push(getReliabilityDatasetLabel(dataset));
       return;
     }
     const color = getReliabilityDatasetColor(dataset, index);
     chartDatasets.push({
-      label: dataset.name,
+      label: getReliabilityDatasetLabel(dataset),
       data: cdf,
       borderColor: color,
       backgroundColor: color,

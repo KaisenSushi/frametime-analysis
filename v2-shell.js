@@ -41,10 +41,16 @@
 
   function scheduleChartResize(kind) {
     requestAnimationFrame(() => {
-      if (kind === 'visualization' || kind === 'all') resizeMainChart();
+      if (kind === 'visualization' || kind === 'all') {
+        resizeMainChart();
+        window.resizeAnalysisBoardCharts?.();
+      }
       if (kind === 'reliability' || kind === 'all') resizeReliabilityChart();
       requestAnimationFrame(() => {
-        if (kind === 'visualization' || kind === 'all') resizeMainChart();
+        if (kind === 'visualization' || kind === 'all') {
+          resizeMainChart();
+          window.resizeAnalysisBoardCharts?.();
+        }
         if (kind === 'reliability' || kind === 'all') resizeReliabilityChart();
       });
     });
@@ -224,6 +230,7 @@
 
         if (seenBusy && !busy) {
           const hasChart = Boolean(window.mainChart) ||
+            Boolean(window.analysisBoardReady) ||
             (Array.isArray(window.chartDatasets) && window.chartDatasets.length > 0);
           if (hasChart) {
             setStep('results', { focusPanel: true });

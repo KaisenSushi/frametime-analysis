@@ -309,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupStatsSidebarControls();
   setupVizChartTypeControls();
+  setupVisualizationResultMode();
 
   const updateReliabilityBtn = document.getElementById('updateReliabilityBtn');
   const reliabilityMetricSelect = document.getElementById('reliabilityMetricSelect');
@@ -471,7 +472,8 @@ function populateAllDatasetSelects() {
       input.value = String(dataset.id ?? dataset.name ?? id);
       const isNewDataset = !knownDatasetIds.has(input.value);
       input.checked = autoSelectAll || currentValues.includes(input.value) || isNewDataset;
-      input.setAttribute('aria-label', `Select ${dataset.name}`);
+      const datasetLabel = window.getDatasetDisplayName?.(dataset) || dataset.name;
+      input.setAttribute('aria-label', `Select ${datasetLabel}`);
 
       const colorDot = document.createElement('span');
       colorDot.className = 'dataset-option-color';
@@ -480,7 +482,8 @@ function populateAllDatasetSelects() {
 
       const name = document.createElement('span');
       name.className = 'dataset-option-name';
-      name.textContent = dataset.name;
+      name.textContent = datasetLabel;
+      name.title = dataset.name;
 
       label.classList.toggle('is-selected', input.checked);
       label.setAttribute('data-selected', String(input.checked));
@@ -561,6 +564,26 @@ function setDatasetPickerAll(pickerOrId, selected) {
     option?.setAttribute('data-selected', String(selected));
   });
   updateDatasetPickerCount(picker);
+}
+
+function setupVisualizationResultMode() {
+  const select = document.getElementById('vizResultMode');
+  const singleControls = document.getElementById('singleChartBuilderControls');
+  const boardHint = document.getElementById('analysisBoardSetupHint');
+  const addButton = document.getElementById('addToChartBtn');
+  if (!select || !singleControls || !boardHint || !addButton) return;
+
+  const sync = ({ changed = false } = {}) => {
+    const boardMode = select.value === 'board';
+    singleControls.classList.toggle('hidden', boardMode);
+    boardHint.classList.toggle('hidden', !boardMode);
+    addButton.textContent = boardMode ? 'Build analysis board' : 'Add to chart';
+    addButton.setAttribute('aria-label', boardMode ? 'Build analysis board' : 'Add selected datasets to chart');
+    if (changed) window.setVisualizationResultMode?.(select.value);
+  };
+
+  select.addEventListener('change', () => sync({ changed: true }));
+  sync();
 }
 
 // Show/hide visualization controls based on chart type.
