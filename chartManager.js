@@ -102,16 +102,16 @@ initChartDefaults();
 
 /** Summary-bar stat colors from the same family as BENCHMARK_COLORS (no red/green coding). */
 const BAR_STAT_DEFS = [
-  { key: 'max',    label: 'Max',       color: '#FBBF24' },
-  { key: 'avg',    label: 'Avg',       color: '#F59E0B' },
-  { key: 'min',    label: 'Min',       color: '#D97706' },
-  { key: 'p1',     label: '1%ile',     color: '#2DD4BF' },
-  { key: 'p01',    label: '0.1%ile',   color: '#22D3EE' },
-  { key: 'p001',   label: '0.01%ile',  color: '#14B8A6' },
-  { key: 'low1',   label: '1% Low',    color: '#E879F9' },
-  { key: 'low01',  label: '0.1% Low',  color: '#C084FC' },
-  { key: 'low001', label: '0.01% Low', color: '#A78BFA' },
-  { key: 'stdev',  label: 'STDEV',     color: '#A3E635' }
+  { key: 'max',    color: '#FBBF24' },
+  { key: 'avg',    color: '#F59E0B' },
+  { key: 'min',    color: '#D97706' },
+  { key: 'p1',     color: '#2DD4BF' },
+  { key: 'p01',    color: '#22D3EE' },
+  { key: 'p001',   color: '#14B8A6' },
+  { key: 'low1',   color: '#E879F9' },
+  { key: 'low01',  color: '#C084FC' },
+  { key: 'low001', color: '#A78BFA' },
+  { key: 'stdev',  color: '#A3E635' }
 ];
 
 const BAR_STAT_DEF_MAP = Object.fromEntries(BAR_STAT_DEFS.map(d => [d.key, d]));
@@ -191,9 +191,9 @@ function buildSummaryBarChart(indices, metric, statKeys) {
   window.chartLabels = labels;
   window.chartDatasets = statKeys.map(statKey => {
     const def = BAR_STAT_DEF_MAP[statKey];
-    const label = def?.label || (typeof window.getStatDisplayName === 'function'
-      ? window.getStatDisplayName(statKey)
-      : statKey);
+    const label = typeof window.getStatDisplayName === 'function'
+      ? window.getStatDisplayName(statKey, [metric])
+      : statKey;
     return {
       label,
       statKey,
@@ -290,17 +290,16 @@ function decimateLTTB(points, threshold) {
 
 /** Cached numeric series for a metric - avoids re-reading every row on each add. */
 function getMetricSeries(dataset, metric) {
-  if (!dataset._seriesCache) dataset._seriesCache = Object.create(null);
-  if (dataset._seriesCache[metric]) return dataset._seriesCache[metric];
+  if (dataset._seriesCache?.metric === metric) return dataset._seriesCache.values;
 
-  // Use the same collection path as Statistics/Reliability so every chart
-  // rejects the same invalid timing samples.
+  // Keep only the most recently requested full series per dataset. Retaining
+  // every metric duplicates large captures and can quickly exhaust memory.
   const values = typeof window.collectMetricValues === 'function'
     ? window.collectMetricValues(dataset, metric)
     : (dataset.rows || [])
         .map(row => getMetricValue(row, metric))
         .filter(value => Number.isFinite(value));
-  dataset._seriesCache[metric] = values;
+  dataset._seriesCache = { metric, values };
   return values;
 }
 

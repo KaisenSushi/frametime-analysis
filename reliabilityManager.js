@@ -88,6 +88,17 @@ function renderReliabilityCdf(datasets, metric) {
   const container = document.getElementById('reliabilityChartContainer');
   if (!canvas || !container) return;
 
+  if (!window.Chart) {
+    if (reliabilityChart) {
+      reliabilityChart.destroy();
+      reliabilityChart = null;
+    }
+    container.classList.add('empty');
+    canvas.setAttribute('aria-hidden', 'true');
+    setReliabilitySkipNotice('Chart.js did not load, so the CDF overlay is unavailable.');
+    return;
+  }
+
   const skipped = [];
   const chartDatasets = [];
 
@@ -140,7 +151,7 @@ function renderReliabilityCdf(datasets, metric) {
     return;
   }
 
-  reliabilityChart = new Chart(canvas.getContext('2d'), {
+  reliabilityChart = new window.Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { datasets: chartDatasets },
     options: {
@@ -209,13 +220,13 @@ function renderReliabilityCdf(datasets, metric) {
   );
 }
 
-function renderReliabilityPage() {
+async function renderReliabilityPage() {
   const datasets = getSelectedReliabilityDatasets();
   const metricSelect = document.getElementById('reliabilityMetricSelect');
   const metric = metricSelect?.value || 'RenderedFPS';
 
   renderReliabilityCdf(datasets, metric);
-  window.renderReliabilityDiagnostics?.(datasets, metric);
+  await window.renderReliabilityDiagnostics?.(datasets, metric);
 }
 
 function resetReliabilityPanel() {
@@ -229,7 +240,10 @@ function resetReliabilityPanel() {
     ?.setAttribute('aria-label', 'Reliability cumulative distribution chart. Select datasets to compare runs.');
   setReliabilitySkipNotice('');
   const diagnostics = document.getElementById('reliabilityDiagnosticsContent');
-  if (diagnostics) diagnostics.innerHTML = '';
+  if (diagnostics) {
+    diagnostics.dataset.renderToken = String((Number(diagnostics.dataset.renderToken) || 0) + 1);
+    diagnostics.innerHTML = '';
+  }
   const heading = document.getElementById('reliabilityDiagnosticsHeading');
   if (heading) heading.textContent = 'Dataset diagnostics';
 }

@@ -48,8 +48,8 @@ function calculateCoefficientOfVariation(values) {
   const mean = series.reduce((s, v) => s + v, 0) / n;
   if (mean === 0) return NaN;
 
-  const stdev = (typeof jStat?.stdev === 'function')
-    ? jStat.stdev(series, true)
+  const stdev = (typeof window.jStat?.stdev === 'function')
+    ? window.jStat.stdev(series, true)
     : Math.sqrt(series.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1));
 
   return stdev / mean;
@@ -82,8 +82,8 @@ function calculateFrameTimeSD(values) {
   const n = series.length;
   if (n < 2) return NaN;
   const mean = series.reduce((sum, value) => sum + value, 0) / n;
-  return (typeof jStat?.stdev === 'function')
-    ? jStat.stdev(series, true)
+  return (typeof window.jStat?.stdev === 'function')
+    ? window.jStat.stdev(series, true)
     : Math.sqrt(series.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (n - 1));
 }
 
@@ -252,6 +252,15 @@ function updateStatsAverageLabel() {
     : 'Select a metric to see which mean is used.';
   avgButton.title = accessibleLabel;
   avgButton.setAttribute('aria-label', accessibleLabel);
+
+  document.querySelectorAll('#statsTypeGroup [data-stat]').forEach(button => {
+    const stat = button.dataset.stat;
+    if (!['p1', 'p01', 'p001', 'low1', 'low01', 'low001', 'high1', 'high01'].includes(stat)) return;
+    const statLabel = getStatDisplayName(stat, selectedMetrics);
+    button.textContent = statLabel;
+    button.title = getStatDescription(stat, selectedMetrics);
+    button.setAttribute('aria-label', statLabel);
+  });
 }
 
 /**
@@ -286,28 +295,26 @@ function formatStatValue(metric, stat, value) {
 function getMetricValue(row, metric) {
   // Handle FrameTime specially - can come from different sources
   if (metric === 'FrameTime') {
-    // Try standard format first
-    if (typeof row['FrameTime'] === 'number') {
-      return row['FrameTime'];
-    }
-    // Try PresentMon format (case insensitive)
-    const mbpKey = Object.keys(row).find(key => 
-      key.toLowerCase() === 'msbetweenpresents');
-    
-    if (mbpKey && typeof row[mbpKey] === 'number') {
-      return row[mbpKey]; // Return MsBetweenPresents as FrameTime
-    }
-    return null;
+    // PresentMon's MsBetweenPresents is authoritative for rendered/presented
+    // frame time. Generic FrameTime remains a compatibility fallback.
+    const presentTime = findNumericKey(row, 'MsBetweenPresents');
+    if (presentTime != null) return presentTime;
+    return typeof row.FrameTime === 'number' ? row.FrameTime : null;
   }
   
-  // Rendered FPS from MsBetweenPresents (GPU submit → present)
+  // Presented/rendered FPS: application Present() cadence.
   if (metric === 'RenderedFPS') {
+    const direct = findNumericKey(row, 'RenderedFPS');
+    if (direct && direct > 0) return direct;
     const ms = findNumericKey(row, 'MsBetweenPresents', 'FrameTime');
     return (ms && ms > 0) ? 1000.0 / ms : null;
   }
 
-  // Displayed FPS from MsBetweenDisplayChange (actual screen refresh)
+  // Displayed FPS: actual on-screen image-change cadence. Never fall back
+  // to presented timing when display-change data is unavailable.
   if (metric === 'DisplayedFPS') {
+    const direct = findNumericKey(row, 'DisplayedFPS');
+    if (direct && direct > 0) return direct;
     const ms = findNumericKey(row, 'MsBetweenDisplayChange', 'MsBetweenDisplayChanges');
     return (ms && ms > 0) ? 1000.0 / ms : null;
   }
@@ -414,8 +421,8 @@ function calculateStatistics(arr, metricName = '', options = {}) {
   // STDEV is always sample stdev around the arithmetic mean (never the harmonic
   // Avg). Labels call this out for FPS so Avg and STDEV are not read as a pair.
   const arithmeticMean = sum / n;
-  const stdev = (typeof jStat?.stdev === 'function')
-      ? jStat.stdev(sorted, true)
+  const stdev = (typeof window.jStat?.stdev === 'function')
+      ? window.jStat.stdev(sorted, true)
       : Math.sqrt(sorted.reduce((s, v) => s + (v - arithmeticMean) ** 2, 0) / (n - 1));
 
   /* -------- percentiles (single‑frame cut‑off) --------------------- */
@@ -532,7 +539,8 @@ function isTimingMetric(metric) {
  */
 function isValidMetricSample(metric, value) {
   if (!Number.isFinite(value)) return false;
-  return !isTimingMetric(metric) || value > 0;
+  if (isTimingMetric(metric) || isFpsLikeMetric(metric)) return value > 0;
+  return true;
 }
 
 function collectFrametimeSeries(dataset) {
@@ -603,14 +611,14 @@ function averageForMetric(values, metric) {
 }
 
 const PERCENTILE_SUPPORT_DIAGNOSTICS = [
-  { key: 'p1', label: '1%ile', fraction: 0.01 },
-  { key: 'p01', label: '0.1%ile', fraction: 0.001 },
-  { key: 'p001', label: '0.01%ile', fraction: 0.0001 },
-  { key: 'low1', label: '1% Low', fraction: 0.01 },
-  { key: 'low01', label: '0.1% Low', fraction: 0.001 },
-  { key: 'low001', label: '0.01% Low', fraction: 0.0001 },
-  { key: 'high1', label: '99% High', fraction: 0.01 },
-  { key: 'high01', label: '99.9% High', fraction: 0.001 }
+  { key: 'p1', fraction: 0.01 },
+  { key: 'p01', fraction: 0.001 },
+  { key: 'p001', fraction: 0.0001 },
+  { key: 'low1', fraction: 0.01 },
+  { key: 'low01', fraction: 0.001 },
+  { key: 'low001', fraction: 0.0001 },
+  { key: 'high1', fraction: 0.01 },
+  { key: 'high01', fraction: 0.001 }
 ];
 
 /**
@@ -638,13 +646,59 @@ function calculateLagAutocorrelation(values, lag = 1) {
 }
 
 /**
- * Computes the usual normal-approximation CI and a conservative AR(1)
- * effective-sample-size correction based on lag-1 autocorrelation.
- * FPS-family intervals use the harmonic mean as their center, but their sample
- * variance follows the Statistics STDEV convention and is measured around the
- * arithmetic mean.
+ * Deterministic PRNG used so exported bootstrap intervals are reproducible for
+ * the same data, metric, block length, and replicate count.
  */
-function calculateAutocorrelationCorrectedCI(values, metric = 'FrameTime') {
+function createSeededRandom(seed) {
+  let state = seed >>> 0;
+  return function random() {
+    state += 0x6D2B79F5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function bootstrapSeed(values, metric, blockLength, replicates) {
+  let seed = 2166136261;
+  const text = `${metric}|${values.length}|${blockLength}|${replicates}`;
+  for (let i = 0; i < text.length; i++) {
+    seed ^= text.charCodeAt(i);
+    seed = Math.imul(seed, 16777619);
+  }
+  const sampleStep = Math.max(1, Math.floor(values.length / 64));
+  for (let i = 0; i < values.length; i += sampleStep) {
+    const scaled = Math.round(values[i] * 1000000);
+    seed ^= scaled;
+    seed = Math.imul(seed, 16777619);
+  }
+  return seed >>> 0;
+}
+
+function quantileFromSorted(sorted, probability) {
+  if (!sorted.length) return NaN;
+  const index = Math.max(0, Math.min(sorted.length - 1, probability * (sorted.length - 1)));
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  const weight = index - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+function chooseMovingBlockLength(sampleCount) {
+  if (sampleCount < 2) return 1;
+  // A cube-root rule is a stable automatic default for moving-block bootstrap
+  // means. It grows with the capture while retaining enough resampled blocks.
+  return Math.max(2, Math.min(sampleCount, Math.round(Math.cbrt(sampleCount))));
+}
+
+/**
+ * Percentile moving-block bootstrap interval for a metric mean. Consecutive
+ * blocks preserve local frame-to-frame dependence. FPS-family metrics use the
+ * harmonic mean; time and other metrics use the arithmetic mean.
+ */
+function calculateBlockBootstrapCI(values, metric = 'FrameTime', options = {}) {
   const series = (values || []).filter(Number.isFinite);
   const n = series.length;
   if (n < 2) return null;
@@ -652,44 +706,329 @@ function calculateAutocorrelationCorrectedCI(values, metric = 'FrameTime') {
   const mean = averageForMetric(series, metric);
   if (!Number.isFinite(mean)) return null;
 
-  const varianceCenter = series.reduce((sum, value) => sum + value, 0) / n;
-  const variance = series.reduce((sum, value) => {
-    const diff = value - varianceCenter;
-    return sum + diff * diff;
-  }, 0) / (n - 1);
-  const stdev = Math.sqrt(variance);
-  const r1 = calculateLagAutocorrelation(series, 1);
+  const confidence = Number.isFinite(options.confidence) ? options.confidence : 0.95;
+  const replicates = Math.max(200, Math.min(5000, Math.round(options.replicates || 1200)));
+  const blockLength = Math.max(1, Math.min(
+    n,
+    Math.round(options.blockLength || chooseMovingBlockLength(n))
+  ));
+  const isFps = isFpsLikeMetric(metric);
+  const transformed = isFps ? series.map(value => 1 / value) : series;
+  const startCount = Math.max(1, n - blockLength + 1);
+  const blockSums = new Float64Array(startCount);
 
-  // Avoid a singular denominator at r1 = -1 while retaining the requested AR(1) formula.
-  const boundedR1 = Number.isFinite(r1) ? Math.max(-0.99, Math.min(0.99, r1)) : 0;
-  const rawEffectiveN = n * (1 - boundedR1) / (1 + boundedR1);
-  // Preserve the requested AR(1) correction. Negative correlation can yield
-  // n_eff > n; only clamp the lower bound to keep the interval finite.
-  const effectiveN = Math.max(1, rawEffectiveN);
-  const z95 = 1.96;
-  const naiveMargin = z95 * stdev / Math.sqrt(n);
-  const correctedMargin = z95 * stdev / Math.sqrt(effectiveN);
+  let rolling = 0;
+  for (let i = 0; i < blockLength; i++) rolling += transformed[i];
+  blockSums[0] = rolling;
+  for (let start = 1; start < startCount; start++) {
+    rolling += transformed[start + blockLength - 1] - transformed[start - 1];
+    blockSums[start] = rolling;
+  }
 
+  const fullBlocks = Math.floor(n / blockLength);
+  const remainder = n - fullBlocks * blockLength;
+  const random = createSeededRandom(
+    Number.isFinite(options.seed)
+      ? options.seed
+      : bootstrapSeed(series, metric, blockLength, replicates)
+  );
+  const estimates = new Float64Array(replicates);
+
+  for (let replicate = 0; replicate < replicates; replicate++) {
+    let total = 0;
+    for (let block = 0; block < fullBlocks; block++) {
+      total += blockSums[Math.floor(random() * startCount)];
+    }
+    if (remainder) {
+      const maxStart = Math.max(1, n - remainder + 1);
+      const start = Math.floor(random() * maxStart);
+      for (let offset = 0; offset < remainder; offset++) {
+        total += transformed[start + offset];
+      }
+    }
+    estimates[replicate] = isFps ? n / total : total / n;
+  }
+
+  const sortedEstimates = Array.from(estimates).sort((a, b) => a - b);
+  const alpha = (1 - confidence) / 2;
   return {
     n,
     mean,
-    meanKind: isFpsLikeMetric(metric) ? 'harmonic' : 'arithmetic',
-    stdev,
-    r1,
-    effectiveN,
-    naive: [mean - naiveMargin, mean + naiveMargin],
-    corrected: [mean - correctedMargin, mean + correctedMargin]
+    meanKind: isFps ? 'harmonic' : 'arithmetic',
+    r1: calculateLagAutocorrelation(series, 1),
+    blockLength,
+    replicates,
+    confidence,
+    interval: [
+      quantileFromSorted(sortedEstimates, alpha),
+      quantileFromSorted(sortedEstimates, 1 - alpha)
+    ],
+    method: 'moving-block-bootstrap-percentile'
   };
+}
+
+// Backwards-compatible function name for external callers. The returned method
+// is now a moving-block bootstrap, not a normal/AR(1) approximation.
+function calculateAutocorrelationCorrectedCI(values, metric = 'FrameTime', options = {}) {
+  return calculateBlockBootstrapCI(values, metric, options);
+}
+
+function workerPercentile(sorted, percentile) {
+  if (!sorted.length) return NaN;
+  const index = (percentile / 100) * (sorted.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  const weight = index - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+function workerMode(sortedInput) {
+  const sorted = sortedInput.slice();
+  const n = sorted.length;
+  if (!n) return NaN;
+  if (n === 1) return sorted[0];
+  if (n === 2) return (sorted[0] + sorted[1]) / 2;
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo + 1 >= 4) {
+    const length = hi - lo + 1;
+    const half = Math.ceil(length / 2);
+    let best = lo;
+    let bestWidth = sorted[lo + half - 1] - sorted[lo];
+    for (let i = lo + 1; i <= hi - half + 1; i++) {
+      const width = sorted[i + half - 1] - sorted[i];
+      if (width < bestWidth) {
+        bestWidth = width;
+        best = i;
+      }
+    }
+    lo = best;
+    hi = best + half - 1;
+  }
+  if (hi === lo) return sorted[lo];
+  if (hi - lo === 1) return (sorted[lo] + sorted[hi]) / 2;
+  const leftGap = sorted[lo + 1] - sorted[lo];
+  const rightGap = sorted[hi] - sorted[lo + 1];
+  if (leftGap < rightGap) return (sorted[lo] + sorted[lo + 1]) / 2;
+  if (rightGap < leftGap) return (sorted[lo + 1] + sorted[hi]) / 2;
+  return sorted[lo + 1];
+}
+
+function workerCalculateStatistics(values, metricName) {
+  const sorted = (values || []).filter(Number.isFinite).sort((a, b) => a - b);
+  const n = sorted.length;
+  if (!n) {
+    return {
+      max: NaN, min: NaN, avg: NaN, median: NaN, mode: NaN, stdev: NaN,
+      p1: NaN, p01: NaN, p001: NaN,
+      low1: NaN, low01: NaN, low001: NaN, high1: NaN, high01: NaN
+    };
+  }
+  const isFps = isFpsLikeMetric(metricName);
+  const sum = sorted.reduce((total, value) => total + value, 0);
+  const arithmeticMean = sum / n;
+  const avg = isFps
+    ? n / sorted.reduce((total, value) => total + 1 / value, 0)
+    : arithmeticMean;
+  const stdev = n > 1
+    ? Math.sqrt(sorted.reduce((total, value) => total + (value - arithmeticMean) ** 2, 0) / (n - 1))
+    : 0;
+  const c1 = Math.max(1, Math.ceil(n * 0.01));
+  const c01 = Math.max(1, Math.ceil(n * 0.001));
+  const c001 = Math.max(1, Math.ceil(n * 0.0001));
+  const meanSlice = slice => slice.reduce((total, value) => total + value, 0) / slice.length;
+  const worst = isFps ? sorted : sorted.slice().reverse();
+  const best = isFps ? sorted.slice().reverse() : sorted;
+  return {
+    max: sorted[n - 1],
+    min: sorted[0],
+    avg,
+    median: workerPercentile(sorted, 50),
+    mode: workerMode(sorted),
+    stdev,
+    p1: workerPercentile(sorted, isFps ? 1 : 99),
+    p01: workerPercentile(sorted, isFps ? 0.1 : 99.9),
+    p001: workerPercentile(sorted, isFps ? 0.01 : 99.99),
+    low1: meanSlice(worst.slice(0, c1)),
+    low01: meanSlice(worst.slice(0, c01)),
+    low001: meanSlice(worst.slice(0, c001)),
+    high1: meanSlice(best.slice(0, c1)),
+    high01: meanSlice(best.slice(0, c01))
+  };
+}
+
+function workerCalculateAggregate(values, metricName) {
+  const series = (values || []).filter(value => Number.isFinite(value) && value > 0);
+  const n = series.length;
+  if (n < 2) return NaN;
+  const mean = series.reduce((total, value) => total + value, 0) / n;
+  if (metricName.endsWith('_FTSD')) {
+    return Math.sqrt(series.reduce((total, value) => total + (value - mean) ** 2, 0) / (n - 1));
+  }
+  if (metricName.includes('Coefficient_of_Variation') || metricName === 'Coefficient_of_Variation') {
+    if (!mean) return NaN;
+    const stdev = Math.sqrt(series.reduce((total, value) => total + (value - mean) ** 2, 0) / (n - 1));
+    return stdev / mean;
+  }
+  if (metricName.includes('RMSSD')) {
+    let sumSq = 0;
+    for (let i = 1; i < n; i++) sumSq += (series[i] - series[i - 1]) ** 2;
+    return Math.sqrt(sumSq / (n - 1));
+  }
+  if (metricName.includes('Stepwise_Relative_SD') || metricName === 'Stepwise_Relative_SD') {
+    let sumSq = 0;
+    for (let i = 1; i < n; i++) {
+      const relative = (series[i] - series[i - 1]) / series[i - 1];
+      sumSq += relative * relative;
+    }
+    return Math.sqrt(sumSq / (n - 1));
+  }
+  const variance = series.reduce((total, value) => total + (value - mean) ** 2, 0) / (n - 1);
+  const stdev = Math.sqrt(variance);
+  if (!stdev) return NaN;
+  if (metricName === 'Nonparametric_Skew') {
+    const sorted = series.slice().sort((a, b) => a - b);
+    return (mean - workerPercentile(sorted, 50)) / stdev;
+  }
+  let sumZ3 = 0;
+  let sumZ4 = 0;
+  for (const value of series) {
+    const z = (value - mean) / stdev;
+    sumZ3 += z ** 3;
+    sumZ4 += z ** 4;
+  }
+  if (metricName === 'Skewness') {
+    return n >= 3 ? (n / ((n - 1) * (n - 2))) * sumZ3 : NaN;
+  }
+  if (metricName === 'Kurtosis') {
+    return n >= 4
+      ? (n * (n + 1) / ((n - 1) * (n - 2) * (n - 3))) * sumZ4
+        - (3 * (n - 1) ** 2) / ((n - 2) * (n - 3))
+      : NaN;
+  }
+  return NaN;
+}
+
+let statsWorker = null;
+let statsWorkerUrl = null;
+let statsWorkerRequestId = 0;
+const statsWorkerRequests = new Map();
+
+function getStatsWorkerSource() {
+  return [
+    isFpsLikeMetric.toString(),
+    getPositiveValuesForHarmonicMean.toString(),
+    averageForMetric.toString(),
+    calculateLagAutocorrelation.toString(),
+    createSeededRandom.toString(),
+    bootstrapSeed.toString(),
+    quantileFromSorted.toString(),
+    chooseMovingBlockLength.toString(),
+    calculateBlockBootstrapCI.toString(),
+    workerPercentile.toString(),
+    workerMode.toString(),
+    workerCalculateStatistics.toString(),
+    workerCalculateAggregate.toString(),
+    `self.onmessage = function (event) {
+      const { id, task, items, options } = event.data;
+      try {
+        let results;
+        if (task === 'statistics') {
+          results = items.map(item => ({
+            key: item.key,
+            result: item.aggregate
+              ? workerCalculateAggregate(item.values, item.metric)
+              : workerCalculateStatistics(item.values, item.metric)
+          }));
+        } else {
+          results = items.map(item => ({
+            key: item.key,
+            result: calculateBlockBootstrapCI(item.values, item.metric, options || {})
+          }));
+        }
+        self.postMessage({ id, results });
+      } catch (error) {
+        self.postMessage({ id, error: error && error.message ? error.message : String(error) });
+      }
+    };`
+  ].join('\n\n');
+}
+
+function resetStatsWorker(error) {
+  if (statsWorker) statsWorker.terminate();
+  if (statsWorkerUrl) URL.revokeObjectURL(statsWorkerUrl);
+  statsWorker = null;
+  statsWorkerUrl = null;
+  if (error) {
+    statsWorkerRequests.forEach(({ reject }) => reject(error));
+    statsWorkerRequests.clear();
+  }
+}
+
+function getStatsWorker() {
+  if (statsWorker) return statsWorker;
+  if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
+    return null;
+  }
+  statsWorkerUrl = URL.createObjectURL(new Blob([getStatsWorkerSource()], { type: 'text/javascript' }));
+  statsWorker = new Worker(statsWorkerUrl);
+  statsWorker.onmessage = event => {
+    const { id, results, error } = event.data || {};
+    const request = statsWorkerRequests.get(id);
+    if (!request) return;
+    statsWorkerRequests.delete(id);
+    if (error) request.reject(new Error(error));
+    else request.resolve(results);
+  };
+  statsWorker.onerror = event => {
+    resetStatsWorker(new Error(event.message || 'The statistics worker failed.'));
+  };
+  return statsWorker;
+}
+
+async function calculateBootstrapBatch(items, options = {}) {
+  if (!items.length) return [];
+  const worker = getStatsWorker();
+  if (!worker) {
+    return items.map(item => ({
+      key: item.key,
+      result: calculateBlockBootstrapCI(item.values, item.metric, options)
+    }));
+  }
+  const id = ++statsWorkerRequestId;
+  return new Promise((resolve, reject) => {
+    statsWorkerRequests.set(id, { resolve, reject });
+    worker.postMessage({ id, task: 'bootstrap', items, options });
+  });
+}
+
+async function calculateStatisticsBatch(items) {
+  if (!items.length) return [];
+  const worker = getStatsWorker();
+  if (!worker) {
+    return items.map(item => ({
+      key: item.key,
+      result: item.aggregate
+        ? calculateAggregateMetric(item.values, item.metric)
+        : calculateStatistics(item.values, item.metric)
+    }));
+  }
+  const id = ++statsWorkerRequestId;
+  return new Promise((resolve, reject) => {
+    statsWorkerRequests.set(id, { resolve, reject });
+    worker.postMessage({ id, task: 'statistics', items });
+  });
 }
 
 function getPercentileSupportStatus(expectedTailFrames) {
   if (expectedTailFrames >= 50) {
-    return { label: 'Reliable', className: 'reliable' };
+    return { label: 'Strong sample support', className: 'reliable' };
   }
   if (expectedTailFrames >= 30) {
-    return { label: 'Low confidence', className: 'low-confidence' };
+    return { label: 'Limited sample support', className: 'low-confidence' };
   }
-  return { label: 'Insufficient', className: 'insufficient' };
+  return { label: 'Very low sample support', className: 'insufficient' };
 }
 
 function formatSupportCount(value) {
@@ -714,7 +1053,7 @@ function makeDiagnosticsElement(tag, className, text) {
   return element;
 }
 
-function renderPercentileSupport(container, frameCount) {
+function renderPercentileSupport(container, frameCount, metric = 'FrameTime') {
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
   section.appendChild(makeDiagnosticsElement('h4', '', 'Percentile sample support'));
 
@@ -725,7 +1064,8 @@ function renderPercentileSupport(container, frameCount) {
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ label, fraction }) => {
+  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ key, fraction }) => {
+    const label = getStatDisplayName(key, [metric]);
     const expected = frameCount * fraction;
     const status = getPercentileSupportStatus(expected);
     const row = document.createElement('tr');
@@ -819,11 +1159,10 @@ function formatFrametimeInterval(interval) {
   return formatMetricInterval(interval, 'FrameTime');
 }
 
-function renderConfidenceIntervalDiagnostics(container, series, metric = 'FrameTime') {
+function renderBootstrapIntervalDiagnostics(container, result, metric = 'FrameTime') {
   const section = makeDiagnosticsElement('section', 'stats-diagnostic-section');
-  section.appendChild(makeDiagnosticsElement('h4', '', 'Mean (95% CI)'));
+  section.appendChild(makeDiagnosticsElement('h4', '', 'Mean uncertainty (95%)'));
 
-  const result = calculateAutocorrelationCorrectedCI(series, metric);
   if (!result) {
     section.appendChild(makeDiagnosticsElement(
       'p',
@@ -840,88 +1179,121 @@ function renderConfidenceIntervalDiagnostics(container, series, metric = 'FrameT
     formatMetricMean(result.mean, metric, result.meanKind)
   ));
 
+  const explanation = makeDiagnosticsElement(
+    'p',
+    'stats-diagnostic-explanation',
+    'Percentile moving-block bootstrap. Consecutive blocks preserve local frame-to-frame dependence.'
+  );
+  section.appendChild(explanation);
+
   const ciGrid = makeDiagnosticsElement('div', 'stats-ci-grid');
-  const naive = makeDiagnosticsElement('div', 'stats-ci-card');
-  naive.append(
-    makeDiagnosticsElement('span', 'stats-ci-label', 'raw'),
-    makeDiagnosticsElement('strong', 'stats-ci-value', formatMetricInterval(result.naive, metric)),
-    makeDiagnosticsElement('span', 'stats-ci-note', `n = ${result.n.toLocaleString()}`)
+  const intervalCard = makeDiagnosticsElement('div', 'stats-ci-card corrected');
+  intervalCard.append(
+    makeDiagnosticsElement('span', 'stats-ci-label', 'Moving-block bootstrap'),
+    makeDiagnosticsElement('strong', 'stats-ci-value', formatMetricInterval(result.interval, metric)),
+    makeDiagnosticsElement(
+      'span',
+      'stats-ci-note',
+      `${result.replicates.toLocaleString()} resamples · block length ${result.blockLength.toLocaleString()}`
+    )
   );
 
-  const corrected = makeDiagnosticsElement('div', 'stats-ci-card corrected');
-  const nEff = Math.round(result.effectiveN);
-  let correctedNote = `n_eff = ${nEff.toLocaleString()}`;
-  let correctedLabel = 'Adjusted (lag-1)';
-  if (result.effectiveN > result.n) {
-    correctedNote += ' · n_eff > n (tighter)';
-    corrected.title = 'Negative lag-1 raises n_eff above n, so this interval is tighter than raw.';
-  } else if (result.effectiveN < result.n) {
-    correctedNote += ' · n_eff < n (wider)';
-    corrected.title = 'Positive lag-1 lowers n_eff, so this interval is wider than raw.';
-  }
-
-  corrected.append(
-    makeDiagnosticsElement('span', 'stats-ci-label', correctedLabel),
-    makeDiagnosticsElement('strong', 'stats-ci-value', formatMetricInterval(result.corrected, metric)),
-    makeDiagnosticsElement('span', 'stats-ci-note', correctedNote)
+  const sampleCard = makeDiagnosticsElement('div', 'stats-ci-card');
+  sampleCard.append(
+    makeDiagnosticsElement('span', 'stats-ci-label', 'Observed sample'),
+    makeDiagnosticsElement('strong', 'stats-ci-value', `${result.n.toLocaleString()} valid samples`),
+    makeDiagnosticsElement(
+      'span',
+      'stats-ci-note',
+      Number.isFinite(result.r1) ? `lag-1 = ${result.r1.toFixed(3)}` : 'lag-1 unavailable'
+    )
   );
 
-  ciGrid.append(naive, corrected);
+  ciGrid.append(intervalCard, sampleCard);
   section.appendChild(ciGrid);
   container.appendChild(section);
 }
 
-function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime') {
+async function renderReliabilityDiagnostics(selectedDatasets, metric = 'FrameTime') {
   const content = document.getElementById('reliabilityDiagnosticsContent');
   if (!content) return;
 
   const metricLabel = typeof window.getMetricDisplayName === 'function'
     ? window.getMetricDisplayName(metric)
     : metric;
-
+  const renderToken = String((Number(content.dataset.renderToken) || 0) + 1);
+  content.dataset.renderToken = renderToken;
   content.innerHTML = '';
 
   const heading = document.getElementById('reliabilityDiagnosticsHeading')
     || document.querySelector('.reliability-diagnostics > h2');
-  if (heading) {
-    heading.textContent = `Dataset diagnostics (${metricLabel})`;
-  }
+  if (heading) heading.textContent = `Dataset diagnostics (${metricLabel})`;
 
-  selectedDatasets.forEach((dataset, index) => {
-    const series = typeof collectMetricValues === 'function'
-      ? collectMetricValues(dataset, metric)
-      : collectFrametimeSeries(dataset);
+  const entries = selectedDatasets.map((dataset, index) => ({
+    dataset,
+    index,
+    series: collectMetricValues(dataset, metric)
+  }));
+
+  entries.forEach(({ dataset, index, series }) => {
     const card = makeDiagnosticsElement('article', 'stats-diagnostics-card');
+    card.dataset.datasetId = String(dataset.id ?? index);
     card.style.setProperty('--stripe', getStatsDatasetColor(dataset, index));
 
     const header = makeDiagnosticsElement('header', 'stats-diagnostics-card-header');
     header.append(
       makeDiagnosticsElement('h3', '', dataset.name),
-      makeDiagnosticsElement(
-        'span',
-        'stats-frame-count',
-        `${series.length.toLocaleString()} samples`
-      )
+      makeDiagnosticsElement('span', 'stats-frame-count', `${series.length.toLocaleString()} samples`)
     );
     card.appendChild(header);
 
     if (series.length < 2) {
-      card.appendChild(makeDiagnosticsElement(
-        'p',
-        'stats-diagnostic-explanation',
-        'Need at least two samples.'
-      ));
+      card.appendChild(makeDiagnosticsElement('p', 'stats-diagnostic-explanation', 'Need at least two samples.'));
     } else {
-      renderPercentileSupport(card, series.length);
+      renderPercentileSupport(card, series.length, metric);
       renderAutocorrelationDiagnostics(card, series);
-      renderConfidenceIntervalDiagnostics(card, series, metric);
+      const pending = makeDiagnosticsElement('section', 'stats-diagnostic-section stats-bootstrap-pending');
+      pending.append(
+        makeDiagnosticsElement('h4', '', 'Mean uncertainty (95%)'),
+        makeDiagnosticsElement('p', 'stats-diagnostic-explanation', 'Calculating moving-block bootstrap interval…')
+      );
+      card.appendChild(pending);
     }
-
     content.appendChild(card);
   });
+
+  const items = entries
+    .filter(entry => entry.series.length >= 2)
+    .map(entry => ({
+      key: String(entry.dataset.id ?? entry.index),
+      metric,
+      values: entry.series
+    }));
+  if (!items.length) return;
+
+  try {
+    const results = await calculateBootstrapBatch(items);
+    if (content.dataset.renderToken !== renderToken) return;
+    const resultMap = new Map(results.map(entry => [String(entry.key), entry.result]));
+    entries.forEach(({ dataset, index, series }) => {
+      if (series.length < 2) return;
+      const card = content.querySelector(`[data-dataset-id="${CSS.escape(String(dataset.id ?? index))}"]`);
+      if (!card) return;
+      card.querySelector('.stats-bootstrap-pending')?.remove();
+      renderBootstrapIntervalDiagnostics(card, resultMap.get(String(dataset.id ?? index)), metric);
+    });
+  } catch (error) {
+    console.error('Bootstrap diagnostics failed:', error);
+    if (content.dataset.renderToken !== renderToken) return;
+    content.querySelectorAll('.stats-bootstrap-pending .stats-diagnostic-explanation').forEach(element => {
+      element.textContent = 'Could not calculate the bootstrap interval.';
+    });
+    window.notify?.(`Reliability interval calculation failed: ${error.message}`, 'warning');
+  }
 }
 
 let latestStatsExportState = null;
+let statsCalculationToken = 0;
 
 function getMetricExportUnit(metric) {
   if (['FPS', 'RenderedFPS', 'DisplayedFPS'].includes(metric)) return 'fps';
@@ -932,21 +1304,26 @@ function getMetricExportUnit(metric) {
   return 'value';
 }
 
-function buildExportReliabilityDiagnostics(dataset, selectedStats, metric = 'FrameTime', seriesOverride = null) {
+function buildExportReliabilityDiagnostics(
+  dataset,
+  selectedStats,
+  metric = 'FrameTime',
+  seriesOverride = null,
+  bootstrapOverride = null
+) {
   const series = Array.isArray(seriesOverride)
     ? seriesOverride
     : collectMetricValues(dataset, metric);
   const lag1 = calculateLagAutocorrelation(series, 1);
-  const confidenceInterval = calculateAutocorrelationCorrectedCI(series, metric);
   const percentileSupport = {};
 
-  // Match Reliability UI: always include all percentile-support diagnostics.
-  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ label, fraction }) => {
+  PERCENTILE_SUPPORT_DIAGNOSTICS.forEach(({ key, fraction }) => {
+    const label = getStatDisplayName(key, [metric]);
     const expectedFrames = series.length * fraction;
     const status = getPercentileSupportStatus(expectedFrames);
     percentileSupport[label] = {
       expectedTailFrameCount: expectedFrames,
-      confidence: status.label
+      support: status.label
     };
   });
 
@@ -959,14 +1336,16 @@ function buildExportReliabilityDiagnostics(dataset, selectedStats, metric = 'Fra
     lagOneAutocorrelationCoefficient: Number.isFinite(lag1) ? lag1 : null,
     autocorrelationInterpretation: interpretAutocorrelation(lag1),
     percentileSampleSupport: percentileSupport,
-    autocorrelationCorrected95PercentConfidenceInterval: confidenceInterval
+    movingBlockBootstrap95PercentInterval: bootstrapOverride
       ? {
           unit: getMetricExportUnit(metric),
-          mean: confidenceInterval.mean,
-          meanKind: confidenceInterval.meanKind,
-          lower: confidenceInterval.corrected[0],
-          upper: confidenceInterval.corrected[1],
-          effectiveSampleSize: confidenceInterval.effectiveN
+          mean: bootstrapOverride.mean,
+          meanKind: bootstrapOverride.meanKind,
+          lower: bootstrapOverride.interval[0],
+          upper: bootstrapOverride.interval[1],
+          blockLength: bootstrapOverride.blockLength,
+          resamples: bootstrapOverride.replicates,
+          method: bootstrapOverride.method
         }
       : null
   };
@@ -993,7 +1372,7 @@ function buildStatsJsonExport(state = latestStatsExportState) {
   const statisticDescriptions = {};
   state.selectedStats.forEach(stat => {
     const label = getStatDisplayName(stat, state.regularMetrics);
-    statisticDescriptions[label] = getStatDescription(stat);
+    statisticDescriptions[label] = getStatDescription(stat, state.regularMetrics);
   });
 
   return {
@@ -1083,7 +1462,7 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
     }
   });
   state.selectedStats.forEach(stat => {
-    const description = getStatDescription(stat);
+    const description = getStatDescription(stat, state.regularMetrics);
     if (description) {
       glossary.push(`- **${escapeMarkdown(getStatDisplayName(stat, state.regularMetrics))}:** ${escapeMarkdown(description)}`);
     }
@@ -1104,9 +1483,15 @@ function buildStatsMarkdownExport(state = latestStatsExportState) {
 
     Object.entries(diagnostics.percentileSampleSupport).forEach(([label, support]) => {
       lines.push(
-        `  - ${escapeMarkdown(label)} support: ${formatSupportCount(support.expectedTailFrameCount)} tail frames, ${support.confidence}.`
+        `  - ${escapeMarkdown(label)} support: ${formatSupportCount(support.expectedTailFrameCount)} tail frames, ${support.support}.`
       );
     });
+    const bootstrap = diagnostics.movingBlockBootstrap95PercentInterval;
+    if (bootstrap) {
+      lines.push(
+        `  - Moving-block bootstrap 95% interval: ${formatMetricInterval([bootstrap.lower, bootstrap.upper], diagnostics.basedOnMetricKey)}; block length ${bootstrap.blockLength}, ${bootstrap.resamples.toLocaleString()} resamples.`
+      );
+    }
   });
 
   return lines.join('\n');
@@ -1217,6 +1602,7 @@ async function exportStatsAsPng() {
  * Resets the Statistics panel to its empty state (used on clear-all).
  */
 function resetStatsPanel() {
+  statsCalculationToken++;
   const statsContent = document.getElementById('statistics');
   if (statsContent) statsContent.classList.add('empty-stats');
   const statusLine = document.getElementById('statsStatusLine');
@@ -1253,7 +1639,8 @@ function setStatsExportVisible(visible) {
   el.setAttribute('aria-hidden', visible ? 'false' : 'true');
 }
 
-function updateStatsTable() {
+async function updateStatsTable() {
+  const calculationToken = ++statsCalculationToken;
   const calcBtn = document.getElementById('calculateStatsBtn');
   const statsContent = document.getElementById('statistics');
   const statusLine = document.getElementById('statsStatusLine');
@@ -1265,7 +1652,11 @@ function updateStatsTable() {
   if (statusLine) statusLine.textContent = 'Calculating statistics.';
 
   try {
-    updateStatsTableCore();
+    await updateStatsTableCore(calculationToken);
+  } catch (error) {
+    console.error('Statistics calculation failed:', error);
+    if (statusLine) statusLine.textContent = 'Statistics calculation failed.';
+    window.notify?.(`Statistics calculation failed: ${error.message}`, 'error');
   } finally {
     if (calcBtn) {
       calcBtn.disabled = false;
@@ -1279,7 +1670,7 @@ function updateStatsTable() {
  * Updates the Statistics table (#statsTable) by computing stats for each selected metric,
  * for all selected datasets in the statDatasetSelect dropdown.
  */
-function updateStatsTableCore() {
+async function updateStatsTableCore(calculationToken = statsCalculationToken) {
   const statsContent = document.getElementById('statistics');
   const selectedDatasetIndices = (typeof window.getDatasetPickerIndices === 'function'
     ? window.getDatasetPickerIndices('statDatasetSelect')
@@ -1312,7 +1703,9 @@ function updateStatsTableCore() {
   }
 
   statsContent.classList.remove('empty-stats');
-  setStatsExportVisible(true);
+  latestStatsExportState = null;
+  window.latestStatsExportData = null;
+  setStatsExportVisible(false);
 
   // Diagnostics metric is explicit from Statistics context: prefer FrameTime,
   // else the first regular metric selected - never the Reliability-tab control.
@@ -1335,7 +1728,6 @@ function updateStatsTableCore() {
   };
 
   const metricSeriesCache = new Map();
-  const sortedSeriesCache = new Map();
   const cacheKey = (dataset, metric) => `${dataset.id ?? dataset.name}::${metric}`;
   const cachedCollect = (dataset, metric) => {
     const key = cacheKey(dataset, metric);
@@ -1344,13 +1736,49 @@ function updateStatsTableCore() {
     }
     return metricSeriesCache.get(key);
   };
-  const cachedSorted = (dataset, metric) => {
-    const key = cacheKey(dataset, metric);
-    if (!sortedSeriesCache.has(key)) {
-      sortedSeriesCache.set(key, cachedCollect(dataset, metric).slice().sort((a, b) => a - b));
+
+  // Collect only the requested series, then hand sorting, descriptive
+  // statistics, aggregate metrics, and bootstrap resampling to a Web Worker.
+  const requiredMetrics = new Set([...selectedMetrics, diagnosticsMetric]);
+  for (const dataset of selectedDatasets) {
+    for (const metric of requiredMetrics) {
+      cachedCollect(dataset, metric);
     }
-    return sortedSeriesCache.get(key);
-  };
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  const statisticsItems = [];
+  selectedDatasets.forEach(dataset => {
+    regularMetrics.forEach(metric => {
+      statisticsItems.push({
+        key: cacheKey(dataset, metric),
+        metric,
+        aggregate: false,
+        values: cachedCollect(dataset, metric)
+      });
+    });
+    aggregateMetrics.forEach(metric => {
+      statisticsItems.push({
+        key: cacheKey(dataset, metric),
+        metric,
+        aggregate: true,
+        values: cachedCollect(dataset, metric)
+      });
+    });
+  });
+
+  const [statisticsResults, bootstrapResults] = await Promise.all([
+    calculateStatisticsBatch(statisticsItems),
+    calculateBootstrapBatch(selectedDatasets.map(dataset => ({
+      key: String(dataset.id ?? dataset.name),
+      metric: diagnosticsMetric,
+      values: cachedCollect(dataset, diagnosticsMetric)
+    })))
+  ]);
+  const statisticsResultMap = new Map(statisticsResults.map(entry => [entry.key, entry.result]));
+  const bootstrapResultMap = new Map(bootstrapResults.map(entry => [String(entry.key), entry.result]));
+
+  if (calculationToken !== statsCalculationToken) return;
 
   const mainWrap = document.getElementById('statsMainTableWrap');
   const statsTable = document.getElementById('statsTable');
@@ -1377,7 +1805,7 @@ function updateStatsTableCore() {
         return {
           name: dataset.name,
           color: getStatsDatasetColor(dataset, dsIdx),
-          stats: calculateStatistics(values, metric, { sorted: cachedSorted(dataset, metric) })
+          stats: statisticsResultMap.get(cacheKey(dataset, metric)) || calculateStatistics(values, metric)
         };
       });
       datasetStats.forEach((datasetResult, datasetIndex) => {
@@ -1446,7 +1874,7 @@ function updateStatsTableCore() {
     mainWrap.classList.add('hidden');
   }
 
-  renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState);
+  renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState, statisticsResultMap, cacheKey);
   syncStatsTablesSeparation();
 
   try {
@@ -1455,7 +1883,8 @@ function updateStatsTableCore() {
         entry.dataset,
         selectedStats,
         diagnosticsMetric,
-        cachedCollect(entry.dataset, diagnosticsMetric)
+        cachedCollect(entry.dataset, diagnosticsMetric),
+        bootstrapResultMap.get(String(entry.dataset.id ?? entry.dataset.name)) || null
       );
     });
     latestStatsExportState = exportState;
@@ -1500,7 +1929,7 @@ function syncStatsTablesSeparation() {
   }
 }
 
-function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState = null) {
+function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportState = null, resultMap = null, keyFor = null) {
   const wrap = document.getElementById('statsAggregateWrap');
   const table = document.getElementById('statsAggregateTable');
   if (!wrap || !table) return;
@@ -1563,9 +1992,11 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
     }
     row.appendChild(metricCell);
 
-    const values = selectedDatasets.map(ds =>
-      calculateAggregateMetric(collectAggregateMetricSeries(ds, metric), metric)
-    );
+    const values = selectedDatasets.map(ds => {
+      const key = typeof keyFor === 'function' ? keyFor(ds, metric) : null;
+      if (key && resultMap?.has(key)) return resultMap.get(key);
+      return calculateAggregateMetric(collectAggregateMetricSeries(ds, metric), metric);
+    });
     values.forEach((value, datasetIndex) => {
       if (!exportState?.datasets[datasetIndex]) return;
       exportState.datasets[datasetIndex].stats[metric] = {
@@ -1609,23 +2040,42 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
  * @returns {string} - Human readable name
  */
 function getStatDisplayName(stat, metrics = []) {
+  const selected = metrics.filter(Boolean);
+  const allFps = selected.length > 0 && selected.every(isFpsLikeMetric);
+  const allNonFps = selected.length > 0 && selected.every(metric => !isFpsLikeMetric(metric));
+  const percentileLabels = allFps
+    ? {
+        p1: '1st percentile (worst 1%)',
+        p01: '0.1 percentile (worst 0.1%)',
+        p001: '0.01 percentile (worst 0.01%)'
+      }
+    : allNonFps
+      ? {
+          p1: '99th percentile (worst 1%)',
+          p01: '99.9th percentile (worst 0.1%)',
+          p001: '99.99th percentile (worst 0.01%)'
+        }
+      : {
+          p1: 'Worst 1% cutoff',
+          p01: 'Worst 0.1% cutoff',
+          p001: 'Worst 0.01% cutoff'
+        };
+
   const displayNames = {
-    'max': 'Maximum',
-    'min': 'Minimum',
-    'avg': getAverageDisplayLabel(metrics),
-    'median': 'Median',
-    'mode': 'Mode',
-    'stdev': getStdevDisplayLabel(metrics),
-    'p1': '1% Percentile',
-    'p01': '0.1% Percentile',
-    'p001': '0.01% Percentile',
-    'low1': '1% Low',
-    'low01': '0.1% Low',
-    'low001': '0.01% Low',
-    'high1': '99% High',
-    'high01': '99.9% High'
+    max: 'Maximum',
+    min: 'Minimum',
+    avg: getAverageDisplayLabel(metrics),
+    median: 'Median',
+    mode: 'Mode',
+    stdev: getStdevDisplayLabel(metrics),
+    ...percentileLabels,
+    low1: 'Worst 1% mean',
+    low01: 'Worst 0.1% mean',
+    low001: 'Worst 0.01% mean',
+    high1: 'Best 1% mean',
+    high01: 'Best 0.1% mean'
   };
-  
+
   return displayNames[stat] || stat;
 }
 
@@ -1637,15 +2087,15 @@ function getStdevDisplayLabel(metrics = []) {
   return 'STDEV';
 }
 
-function getStatDescription(stat) {
+function getStatDescription(stat, metrics = []) {
   const descriptions = {
     'avg': 'Mean value. Harmonic for FPS metrics, arithmetic for time-based metrics.',
     'median': 'Middle value after sorting the samples.',
     'mode': 'Most common value: peak of the density for continuous data (half-sample mode), not raw value frequency.',
     'stdev': 'Sample standard deviation around the arithmetic mean. Not paired with harmonic Avg on FPS.',
-    'p1': 'Tail percentile cutoff for the worst 1% of samples.',
-    'p01': 'Tail percentile cutoff for the worst 0.1% of samples.',
-    'p001': 'Tail percentile cutoff for the worst 0.01% of samples.',
+    'p1': isFpsLikeMetric(metrics[0] || '') ? '1st-percentile FPS cutoff for the worst 1% of samples.' : '99th-percentile cutoff for the worst 1% of time-based samples.',
+    'p01': isFpsLikeMetric(metrics[0] || '') ? '0.1-percentile FPS cutoff for the worst 0.1% of samples.' : '99.9th-percentile cutoff for the worst 0.1% of time-based samples.',
+    'p001': isFpsLikeMetric(metrics[0] || '') ? '0.01-percentile FPS cutoff for the worst 0.01% of samples.' : '99.99th-percentile cutoff for the worst 0.01% of time-based samples.',
     'low1': 'Average of the worst 1% of samples.',
     'low01': 'Average of the worst 0.1% of samples.',
     'low001': 'Average of the worst 0.01% of samples.',
@@ -1671,6 +2121,8 @@ window.calculatePercentile = calculatePercentile;
 window.calculateMode = calculateMode;
 window.calculateLagAutocorrelation = calculateLagAutocorrelation;
 window.calculateAutocorrelationCorrectedCI = calculateAutocorrelationCorrectedCI;
+window.calculateBlockBootstrapCI = calculateBlockBootstrapCI;
+window.calculateBootstrapBatch = calculateBootstrapBatch;
 window.renderReliabilityDiagnostics = renderReliabilityDiagnostics;
 window.updateStatsTable = updateStatsTable;
 window.resetStatsPanel = resetStatsPanel;

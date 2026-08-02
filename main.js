@@ -1,3 +1,63 @@
+function checkApplicationDependencies() {
+  const missing = new Set(window.__ftaDependencyFailures || []);
+  if (!window.Chart) missing.add('Chart.js');
+  if (!window.jStat) missing.add('jStat');
+  if (!window.htmlToImage) missing.add('PNG export');
+
+  const chartUnavailable = !window.Chart;
+  ['addToChartBtn', 'updateReliabilityBtn', 'resetZoomBtn', 'exportChartPngBtn', 'exportReliabilityPngBtn']
+    .forEach(id => {
+      const button = document.getElementById(id);
+      if (button && chartUnavailable) {
+        button.disabled = true;
+        button.title = 'Chart.js did not load.';
+      }
+    });
+
+  if (!window.htmlToImage) {
+    const button = document.getElementById('exportStatsPngBtn');
+    if (button) {
+      button.disabled = true;
+      button.title = 'The PNG export dependency did not load.';
+    }
+  }
+
+  if (window.Chart) {
+    const isRegistered = (registry, name) => {
+      try { return Boolean(registry?.get?.(name)); }
+      catch (error) { return false; }
+    };
+    const hasBoxplot = isRegistered(window.Chart.registry?.controllers, 'boxplot');
+    const hasViolin = isRegistered(window.Chart.registry?.controllers, 'violin');
+    const hasZoom = isRegistered(window.Chart.registry?.plugins, 'zoom');
+    if (!hasBoxplot || !hasViolin) missing.add('Box/violin charts');
+    if (!hasZoom) missing.add('Chart zoom');
+
+    const chartType = document.getElementById('chartTypeSelect');
+    [['boxplot', hasBoxplot], ['violin', hasViolin]].forEach(([value, available]) => {
+      const option = chartType?.querySelector(`option[value="${value}"]`);
+      if (option && !available) {
+        option.disabled = true;
+        option.title = 'The chart extension did not load.';
+      }
+    });
+    if (!hasZoom) {
+      const resetButton = document.getElementById('resetZoomBtn');
+      if (resetButton) {
+        resetButton.disabled = true;
+        resetButton.title = 'The chart zoom extension did not load.';
+      }
+    }
+  }
+
+  if (missing.size) {
+    window.notify?.(
+      `Some optional components did not load: ${Array.from(missing).join(', ')}. Affected features were disabled where possible.`,
+      'warning'
+    );
+  }
+}
+
 function setupTopbarHeightSync() {
   const topbar = document.querySelector('.v2-topbar') || document.querySelector('.app-topbar');
   if (!topbar) return;
@@ -20,6 +80,7 @@ function setupTopbarHeightSync() {
 
 document.addEventListener('DOMContentLoaded', () => {
   setupTopbarHeightSync();
+  checkApplicationDependencies();
   updateMetricDropdowns();
 
   const histogramAsPercentChk = document.getElementById('histogramAsPercent');
@@ -119,9 +180,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateReliabilityBtn.textContent =
       selectedCount === 1 ? 'Updating 1 dataset…' : `Updating ${selectedCount} datasets…`;
     requestAnimationFrame(() => {
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
-          window.renderReliabilityPage?.();
+          await window.renderReliabilityPage?.();
         } finally {
           updateReliabilityBtn.disabled = false;
           updateReliabilityBtn.removeAttribute('aria-busy');
@@ -130,7 +191,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 0);
     });
   });
-  reliabilityMetricSelect?.addEventListener('change', () => window.renderReliabilityPage?.());
+  reliabilityMetricSelect?.addEventListener('change', () => {
+    const resultsPanel = document.getElementById('reliabilityResultsV2');
+    if (resultsPanel && !resultsPanel.classList.contains('hidden')) {
+      window.renderReliabilityPage?.();
+    }
+  });
 
   // 10. Toggle buttons (metric chips manage their own click handlers)
   document.querySelectorAll('.toggle-button').forEach(btn => {
@@ -153,12 +219,8 @@ document.addEventListener('DOMContentLoaded', () => {
       window.updateMetricDropdowns();
     }
     syncColorPickerFromSelection();
-    const reliabilityPanel = document.getElementById('reliability');
-    const reliabilityMode = document.querySelector('.v2-mode[data-mode="reliability"]:not(.hidden)');
-    if (
-      reliabilityMode ||
-      (reliabilityPanel && !reliabilityPanel.closest('.v2-step-panel.hidden'))
-    ) {
+    const reliabilityResults = document.getElementById('reliabilityResultsV2');
+    if (reliabilityResults && !reliabilityResults.classList.contains('hidden')) {
       window.renderReliabilityPage?.();
     }
   });

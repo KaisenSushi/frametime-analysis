@@ -70,6 +70,28 @@
     });
   }
 
+  function syncWorkflowAria(mode = getActiveV2Mode(), step = null) {
+    if (!mode) return;
+    const activeMode = document.querySelector(`.v2-mode[data-mode="${mode}"]`);
+    const activeStep = step || activeMode?.querySelector('.v2-step-panel:not(.hidden)')?.getAttribute('data-step') || 'setup';
+
+    document.querySelectorAll('.v2-step').forEach(button => {
+      const buttonStep = button.getAttribute('data-step');
+      const panel = activeMode?.querySelector(`.v2-step-panel[data-step="${buttonStep}"]`);
+      if (panel?.id) button.setAttribute('aria-controls', panel.id);
+    });
+
+    document.querySelectorAll('.v2-mode').forEach(modeSection => {
+      const modeActive = modeSection.getAttribute('data-mode') === mode;
+      modeSection.querySelectorAll('.v2-step-panel').forEach(panel => {
+        const panelStep = panel.getAttribute('data-step');
+        const visible = modeActive && panelStep === activeStep && !panel.classList.contains('hidden');
+        panel.setAttribute('aria-hidden', String(!visible));
+        panel.setAttribute('aria-labelledby', panelStep === 'results' ? 'v2StepResults' : 'v2StepSetup');
+      });
+    });
+  }
+
   function focusStepLanding(mode, step) {
     const modeSection = document.querySelector(`.v2-mode[data-mode="${mode}"]`);
     const panel = modeSection?.querySelector(`.v2-step-panel[data-step="${step}"]`);
@@ -88,12 +110,10 @@
       section.setAttribute('aria-hidden', String(!active));
     });
     syncModeTablist(mode);
+    syncWorkflowAria(mode);
     const title = document.getElementById('v2WorkspaceTitle');
     if (title) {
       title.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
-    }
-    if (mode === 'reliability') {
-      window.renderReliabilityPage?.();
     }
     if (focusPanel) {
       const step = document.querySelector(`.v2-mode[data-mode="${mode}"] .v2-step-panel:not(.hidden)`)
@@ -114,6 +134,7 @@
     });
 
     syncStepTablist(step);
+    syncWorkflowAria(mode, step);
 
     if (step === 'results') {
       if (mode === 'visualization') scheduleChartResize('visualization');
@@ -213,7 +234,7 @@
           return;
         }
 
-        if (performance.now() - started > 8000) return;
+        if (performance.now() - started > 60000) return;
         requestAnimationFrame(tick);
       };
 
@@ -252,7 +273,7 @@
           finish();
           return;
         }
-        if (performance.now() - started > 8000) return;
+        if (performance.now() - started > 60000) return;
         requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
@@ -282,7 +303,7 @@
           return;
         }
 
-        if (performance.now() - started > 8000) return;
+        if (performance.now() - started > 60000) return;
         requestAnimationFrame(tick);
       };
 

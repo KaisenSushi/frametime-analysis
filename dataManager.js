@@ -34,6 +34,9 @@ function clearAllDatasets() {
   console.log("All datasets cleared.");
 }
 
+const LARGE_FILE_BYTES = 50 * 1024 * 1024;
+const SUPPORTED_CAPTURE_EXTENSION = /\.(csv|txt|json)$/i;
+
 const FRAME_ALIASES = [
   { key:'frametime',             scale:1     },
   { key:'frametime(ms)',         scale:1     },
@@ -42,8 +45,8 @@ const FRAME_ALIASES = [
   { key:'frame delta time(ms)',  scale:1     }
 ];
 
-function canonKey(str){          // lower‑case & strip spaces
-  return str.toLowerCase().replace(/\s+/g,'');
+function canonKey(str){
+  return String(str ?? '').toLowerCase().replace(/\s+/g,'');
 }
 
 const METRIC_BLACKLIST = new Set([
@@ -114,7 +117,6 @@ const STATS_DEFAULT_ACTIVE = new Set([
 ]);
 const noCommonMetricsNotifiedSelections = new Set();
 
-// Grouping for the Statistics sidebar metric chips.
 const STATS_METRIC_GROUPS = [
   { label: 'Performance - Rendered', metrics: ['RenderedFPS', 'MsBetweenPresents'] },
   { label: 'Performance - Displayed', metrics: ['DisplayedFPS', 'MsBetweenDisplayChange'] },
@@ -136,156 +138,101 @@ const STATS_METRIC_GROUPS = [
   { label: 'GPU / latency', metrics: ['MsGPUBusy', 'MsUntilDisplayed'] }
 ];
 
-// global UI flag (default = basic mode)
 window.showAdvancedMetrics = false;
 
+function findCaseInsensitiveKey(row, candidate) {
+  const target = String(candidate).toLowerCase();
+  return Object.keys(row).find(key => key.toLowerCase() === target) || null;
+}
 
 /**
- * Ensures row.FrameTime and row.FPS exist, creating them from aliases when
- * necessary.
+ * Adds legacy FrameTime/FPS aliases without conflating displayed timing with
+ * presented timing. Displayed metrics are always sourced exclusively from
+ * MsBetweenDisplayChange.
  */
 function normaliseRow(row){
   const map = {};
-  Object.keys(row).forEach(k => map[ canonKey(k) ] = k);
+  Object.keys(row).forEach(k => map[canonKey(k)] = k);
 
-  /* FrameTime ----------------------------------------------------------- */
   if (row.FrameTime == null){
     for (const {key,scale} of FRAME_ALIASES){
-      const m = map[key];
-      if (m){
-        const v = Number(row[m]);
-        if (Number.isFinite(v)){
-          row.FrameTime = v * scale;
-          break;
-        }
+      const match = map[canonKey(key)];
+      if (!match) continue;
+      const value = Number(row[match]);
+      if (Number.isFinite(value) && value > 0){
+        row.FrameTime = value * scale;
+        break;
       }
     }
   }
 
-  /* FPS ----------------------------------------------------------------- */
   if (row.FPS == null){
-    const fpsKey = map['fps'];
-    if (fpsKey && Number.isFinite(row[fpsKey])){
-      row.FPS = Number(row[fpsKey]);
+    const fpsKey = map.fps;
+    const fpsValue = fpsKey ? Number(row[fpsKey]) : NaN;
+    if (Number.isFinite(fpsValue) && fpsValue > 0){
+      row.FPS = fpsValue;
     } else if (Number.isFinite(row.FrameTime) && row.FrameTime > 0){
-      row.FPS = 1000 / row.FrameTime;           // derive from FT
+      row.FPS = 1000 / row.FrameTime;
     }
   }
 
-  /* Back‑fill FrameTime from FPS if still missing ---------------------- */
   if (row.FrameTime == null && Number.isFinite(row.FPS) && row.FPS > 0){
     row.FrameTime = 1000 / row.FPS;
   }
 }
 
+function splitCsvRecords(text) {
+  const records = [];
+  let current = '';
+  let inQuotes = false;
 
-/**
- * Generic JSON‑table reader (CapFrameX today, other tools tomorrow)
- * ---------------------------------------------------------------
- *  • Detects the “per‑frame array” length (taken from MsBetweenPresents).
- *  • Copies *all* CaptureData fields that are arrays of that length.
- *  • Still runs normaliseRow() to create FrameTime / FPS aliases.
- *  • Returns an [] of plain row objects that plug into the rest of
- *    your pipeline unchanged.
- */
-function parseCfxJson(text, fileName){
-  let json;
-  try{
-    json = JSON.parse(text);
-  }catch(e){
-    console.warn('Not valid JSON:', fileName);
-    return { error: 'invalid_json', message: e.message };
-  }
-  if (!json?.Runs?.length){
-    console.warn('No Runs[] array in file:', fileName);
-    return [];
-  }
-
-  const rows = [];
-
-  json.Runs.forEach(run=>{
-    const cd = run.CaptureData ?? {};
-
-    const arrayFields = Object.entries(cd).filter(([, value]) => Array.isArray(value));
-    if (!arrayFields.length) return;
-
-    const lengths = arrayFields.map(([, value]) => value.length);
-    const frames = Math.min(...lengths);
-    if (new Set(lengths).size > 1) {
-      const message = `CaptureData arrays have mismatched lengths in ${fileName}; trimming this run to ${frames} frame(s).`;
-      console.warn(message);
-      window.notify?.(message, 'warning');
-    }
-    if (!frames) return;
-
-    // Mismatched CaptureData arrays are trimmed to the shortest length.
-    for (let i=0; i<frames; i++){
-      const r = {};
-
-      // copy every per‑frame column
-      arrayFields.forEach(([key, val]) => {
-        r[key] = val[i];
-      });
-
-      // un‑alias MsBetweenPresents → FrameTime (ms)
-      if (r.MsBetweenPresents != null && r.FrameTime == null){
-        r.FrameTime = r.MsBetweenPresents;      // already in ms
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"') {
+      current += char;
+      if (inQuotes && text[i + 1] === '"') {
+        current += text[++i];
+      } else {
+        inQuotes = !inQuotes;
       }
-
-      normaliseRow(r);          // adds FPS / fills aliases & gaps
-      rows.push(r);
+      continue;
     }
-  });
+    if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && text[i + 1] === '\n') i++;
+      records.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
 
-  return rows;
+  if (inQuotes) throw new Error('CSV contains an unterminated quoted field.');
+  if (current || !records.length) records.push(current);
+  return records;
 }
 
-
-
-
-
-/**
- * Reads CSV text into an array of objects, handling quoted strings, multiple delimiters, and line endings.
- * @param {string} text - The CSV file contents as a string.
- * @returns {Array<Object>} The parsed rows as an array of objects.
- */
-function parseCSV(text) {
-  text = text.replace(/\r\n|\r|\n/g, '\n').trim();
-  const lines = text.split('\n');
-  if (!lines.length || !lines[0].trim()) return [];
-
-  const delimiter = [',','\t',';'].sort(
-    (a,b)=> lines[0].split(b).length - lines[0].split(a).length
-  )[0];
-
-  const headers = parseCSVLine(lines[0], delimiter);
-  return lines
-    .slice(1)
-    .filter(line => line.trim() !== '')
-    .map(line => {
-      const vals = parseCSVLine(line, delimiter);
-      const obj  = {};
-      headers.forEach((h,i)=>{
-        const raw = vals[i]?.trim() ?? '';
-        if (raw === '') {
-          obj[h] = null;
-          return;
-        }
-        const num = Number(raw);
-        obj[h] = Number.isFinite(num) ? num : raw;
-      });
-      normaliseRow(obj);
-      return obj;
-    });
+function countUnquotedDelimiter(record, delimiter) {
+  let count = 0;
+  let inQuotes = false;
+  for (let i = 0; i < record.length; i++) {
+    const char = record[i];
+    if (char === '"') {
+      if (inQuotes && record[i + 1] === '"') i++;
+      else inQuotes = !inQuotes;
+    } else if (!inQuotes && char === delimiter) {
+      count++;
+    }
+  }
+  return count;
 }
 
+function detectCsvDelimiter(headerRecord) {
+  return [',', '\t', ';'].reduce((best, delimiter) => {
+    const count = countUnquotedDelimiter(headerRecord, delimiter);
+    return count > best.count ? { delimiter, count } : best;
+  }, { delimiter: ',', count: -1 }).delimiter;
+}
 
-/**
- * Parse a single CSV line, handling quoted fields with commas
- * @param {string} line - Single line from CSV
- * @param {string} delimiter - Delimiter character
- * @returns {string[]} Array of field values
- */
 function parseCSVLine(line, delimiter) {
   const result = [];
   let inQuotes = false;
@@ -293,40 +240,247 @@ function parseCSVLine(line, delimiter) {
 
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
-
     if (char === '"') {
       if (inQuotes && line[i + 1] === '"') {
-        // Escaped quote inside a quoted field
         currentValue += '"';
-        i++; // Skip the next quote
+        i++;
       } else {
         inQuotes = !inQuotes;
       }
     } else if (char === delimiter && !inQuotes) {
-      result.push(currentValue.trim());
+      result.push(currentValue);
       currentValue = '';
     } else {
       currentValue += char;
     }
   }
-
-  // Add the last field
-  result.push(currentValue.trim());
-
-  // Remove outer quotes and unescape inner quotes
-  return result.map(val => {
-    val = val.trim();
-    if (val.startsWith('"') && val.endsWith('"')) {
-      val = val.substring(1, val.length - 1).replace(/""/g, '"');
-    }
-    return val;
-  });
+  if (inQuotes) throw new Error('CSV contains an unterminated quoted field.');
+  result.push(currentValue);
+  return result;
 }
 
-/**
- * Handles file selection event for CSV/TXT uploads,
- * reads each file, parses the data, and stores it in allDatasets.
- */
+function makeUniqueHeaders(rawHeaders) {
+  const counts = new Map();
+  const duplicates = [];
+  const headers = rawHeaders.map((value, index) => {
+    const base = String(value ?? '').trim() || `Column ${index + 1}`;
+    const key = base.toLowerCase();
+    const count = (counts.get(key) || 0) + 1;
+    counts.set(key, count);
+    if (count === 1) return base;
+    duplicates.push(base);
+    return `${base} (${count})`;
+  });
+  return { headers, duplicates: [...new Set(duplicates)] };
+}
+
+function parseNumericCsvValue(raw, delimiter) {
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed) return null;
+  const normalized = delimiter === ';' && /^[+-]?(?:\d+),(?:\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)
+    ? trimmed.replace(',', '.')
+    : trimmed;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : raw;
+}
+
+function isRecognisedTimingHeader(header) {
+  const key = String(header).toLowerCase().replace(/[\s_()\[\]-]+/g, '');
+  return /^(frametime|frametimems|frametimeus|framedeltatimems|msbetweenpresents|msbetweendisplaychange|msinpresentapi|msuntilrendercomplete|msuntilpresented|displayedframetime|renderedfps|displayedfps|fps)$/.test(key);
+}
+
+function parseCSVDetailed(text, fileName = 'capture') {
+  const warnings = [];
+  const source = String(text ?? '').replace(/^\uFEFF/, '');
+  const records = splitCsvRecords(source).filter((record, index) => index === 0 || record.trim() !== '');
+  if (!records.length || !records[0].trim()) {
+    return { rows: [], warnings, metadata: { format: 'csv', sourceColumns: [] } };
+  }
+
+  const delimiter = detectCsvDelimiter(records[0]);
+  const rawHeaders = parseCSVLine(records[0], delimiter);
+  const { headers, duplicates } = makeUniqueHeaders(rawHeaders);
+  if (duplicates.length) {
+    warnings.push(`Duplicate column name(s) were disambiguated in ${fileName}: ${duplicates.join(', ')}.`);
+  }
+  if (!headers.some(isRecognisedTimingHeader)) {
+    warnings.push(`No recognised timing column was found in ${fileName}. Detected: ${headers.slice(0, 8).join(', ') || 'none'}.`);
+  }
+
+  const rows = [];
+  let malformedRows = 0;
+  for (let i = 1; i < records.length; i++) {
+    const values = parseCSVLine(records[i], delimiter);
+    if (values.length !== headers.length) {
+      malformedRows++;
+      continue;
+    }
+    const row = {};
+    for (let column = 0; column < headers.length; column++) {
+      row[headers[column]] = parseNumericCsvValue(values[column], delimiter);
+    }
+    normaliseRow(row);
+    rows.push(row);
+  }
+
+  if (malformedRows) {
+    warnings.push(`Skipped ${malformedRows.toLocaleString()} malformed row(s) in ${fileName} because their column counts did not match the header.`);
+  }
+
+  return {
+    rows,
+    warnings,
+    metadata: {
+      format: 'csv',
+      delimiter: delimiter === '\t' ? 'tab' : delimiter,
+      sourceColumns: headers,
+      malformedRows
+    }
+  };
+}
+
+function parseCSV(text) {
+  return parseCSVDetailed(text).rows;
+}
+
+function parseCfxJsonDetailed(text, fileName = 'capture.json') {
+  const warnings = [];
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (error) {
+    return { error: 'invalid_json', message: error.message, rows: [], warnings, metadata: { format: 'json' } };
+  }
+  if (!json?.Runs?.length) {
+    return { rows: [], warnings: [`No Runs[] array was found in ${fileName}.`], metadata: { format: 'json', sourceColumns: [] } };
+  }
+
+  const rows = [];
+  const sourceColumns = new Set();
+  json.Runs.forEach((run, runIndex) => {
+    const captureData = run?.CaptureData ?? {};
+    const arrayFields = Object.entries(captureData).filter(([, value]) => Array.isArray(value));
+    if (!arrayFields.length) return;
+    arrayFields.forEach(([key]) => sourceColumns.add(key));
+
+    const lengths = arrayFields.map(([, value]) => value.length);
+    const frames = Math.min(...lengths);
+    if (new Set(lengths).size > 1) {
+      warnings.push(`CaptureData arrays in run ${runIndex + 1} of ${fileName} had different lengths and were trimmed to ${frames.toLocaleString()} frame(s).`);
+    }
+    for (let i = 0; i < frames; i++) {
+      const row = {};
+      arrayFields.forEach(([key, values]) => { row[key] = values[i]; });
+      normaliseRow(row);
+      rows.push(row);
+    }
+  });
+
+  return {
+    rows,
+    warnings,
+    metadata: { format: 'json', sourceColumns: [...sourceColumns] }
+  };
+}
+
+function parseCfxJson(text, fileName) {
+  const result = parseCfxJsonDetailed(text, fileName);
+  return result.error ? { error: result.error, message: result.message } : result.rows;
+}
+
+let dataWorker = null;
+let dataWorkerUrl = null;
+let dataWorkerRequestId = 0;
+const dataWorkerRequests = new Map();
+
+function getDataWorkerSource() {
+  const declarations = [
+    `const FRAME_ALIASES = ${JSON.stringify(FRAME_ALIASES)};`,
+    canonKey.toString(),
+    normaliseRow.toString(),
+    splitCsvRecords.toString(),
+    countUnquotedDelimiter.toString(),
+    detectCsvDelimiter.toString(),
+    parseCSVLine.toString(),
+    makeUniqueHeaders.toString(),
+    parseNumericCsvValue.toString(),
+    isRecognisedTimingHeader.toString(),
+    parseCSVDetailed.toString(),
+    parseCfxJsonDetailed.toString()
+  ];
+  declarations.push(`self.onmessage = function (event) {
+    const { id, buffer, fileName, isJson } = event.data;
+    try {
+      const text = new TextDecoder('utf-8').decode(buffer);
+      const result = isJson
+        ? parseCfxJsonDetailed(text, fileName)
+        : parseCSVDetailed(text, fileName);
+      self.postMessage({ id, result });
+    } catch (error) {
+      self.postMessage({ id, error: error && error.message ? error.message : String(error) });
+    }
+  };`);
+  return declarations.join('\n\n');
+}
+
+function resetDataWorker(error) {
+  if (dataWorker) dataWorker.terminate();
+  if (dataWorkerUrl) URL.revokeObjectURL(dataWorkerUrl);
+  dataWorker = null;
+  dataWorkerUrl = null;
+  if (error) {
+    dataWorkerRequests.forEach(({ reject }) => reject(error));
+    dataWorkerRequests.clear();
+  }
+}
+
+function getDataWorker() {
+  if (dataWorker) return dataWorker;
+  if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
+    return null;
+  }
+  dataWorkerUrl = URL.createObjectURL(new Blob([getDataWorkerSource()], { type: 'text/javascript' }));
+  dataWorker = new Worker(dataWorkerUrl);
+  dataWorker.onmessage = event => {
+    const { id, result, error } = event.data || {};
+    const request = dataWorkerRequests.get(id);
+    if (!request) return;
+    dataWorkerRequests.delete(id);
+    if (error) request.reject(new Error(error));
+    else request.resolve(result);
+  };
+  dataWorker.onerror = event => {
+    resetDataWorker(new Error(event.message || 'The capture parser worker failed.'));
+  };
+  return dataWorker;
+}
+
+async function parseCaptureFile(file) {
+  const buffer = await file.arrayBuffer();
+  const worker = getDataWorker();
+  if (worker) {
+    const id = ++dataWorkerRequestId;
+    return new Promise((resolve, reject) => {
+      dataWorkerRequests.set(id, { resolve, reject });
+      worker.postMessage({
+        id,
+        buffer,
+        fileName: file.name,
+        isJson: file.name.toLowerCase().endsWith('.json')
+      }, [buffer]);
+    });
+  }
+
+  const text = new TextDecoder('utf-8').decode(buffer);
+  return file.name.toLowerCase().endsWith('.json')
+    ? parseCfxJsonDetailed(text, file.name)
+    : parseCSVDetailed(text, file.name);
+}
+
+function yieldToMainThread() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 function makeUniqueDatasetName(originalName) {
   const dotIndex = originalName.lastIndexOf('.');
   const hasExtension = dotIndex > 0;
@@ -344,18 +498,11 @@ function makeUniqueDatasetName(originalName) {
 }
 
 function resolveDuplicateDataset(fileName) {
-  const existingIndex = (window.allDatasets || [])
-    .findIndex(dataset => dataset.name === fileName);
-  if (existingIndex === -1) {
-    return Promise.resolve({ action: 'add', name: fileName, existingIndex: -1 });
-  }
+  const existingIndex = (window.allDatasets || []).findIndex(dataset => dataset.name === fileName);
+  if (existingIndex === -1) return Promise.resolve({ action: 'add', name: fileName, existingIndex: -1 });
 
   if (typeof HTMLDialogElement === 'undefined') {
-    return Promise.resolve({
-      action: 'rename',
-      name: makeUniqueDatasetName(fileName),
-      existingIndex
-    });
+    return Promise.resolve({ action: 'rename', name: makeUniqueDatasetName(fileName), existingIndex });
   }
 
   return new Promise(resolve => {
@@ -374,36 +521,24 @@ function resolveDuplicateDataset(fileName) {
     title.id = titleId;
     title.textContent = 'Duplicate dataset';
     description.textContent = `"${fileName}" is already loaded. Choose how to handle it.`;
-    replaceButton.type = 'button';
+    replaceButton.type = keepBothButton.type = cancelButton.type = 'button';
     replaceButton.textContent = 'Replace';
-    keepBothButton.type = 'button';
     keepBothButton.textContent = 'Keep both';
-    cancelButton.type = 'button';
     cancelButton.textContent = 'Cancel';
     actions.append(replaceButton, keepBothButton, cancelButton);
     dialog.append(title, description, actions);
     document.body.appendChild(dialog);
 
     let action = 'cancel';
-    const closeDialog = (nextAction) => {
-      action = nextAction;
-      dialog.close();
-    };
+    const closeDialog = nextAction => { action = nextAction; dialog.close(); };
     replaceButton.addEventListener('click', () => closeDialog('replace'));
     keepBothButton.addEventListener('click', () => closeDialog('rename'));
     cancelButton.addEventListener('click', () => closeDialog('cancel'));
-    dialog.addEventListener('cancel', event => {
-      event.preventDefault();
-      closeDialog('cancel');
-    });
+    dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog('cancel'); });
     dialog.addEventListener('close', () => {
       dialog.remove();
       previouslyFocused?.focus?.();
-      resolve({
-        action,
-        name: action === 'rename' ? makeUniqueDatasetName(fileName) : fileName,
-        existingIndex
-      });
+      resolve({ action, name: action === 'rename' ? makeUniqueDatasetName(fileName) : fileName, existingIndex });
     }, { once: true });
 
     dialog.showModal();
@@ -411,86 +546,40 @@ function resolveDuplicateDataset(fileName) {
   });
 }
 
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = event => resolve(event.target.result);
-    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-    reader.readAsText(file);
-  });
-}
-
 async function handleFileUpload(e) {
-  const files = e.target.files;
+  const files = Array.from(e?.target?.files || []);
   if (!files.length) return;
 
   const inputElement = e.target;
-  const totalFiles = files.length;
-  let processedCount = 0;
   let successCount = 0;
   let errorCount = 0;
   let renamedCount = 0;
   let replacedCount = 0;
   let skippedCount = 0;
 
-  function finishOneFile() {
-    processedCount++;
-    if (processedCount !== totalFiles) return;
-
-    if (replacedCount > 0) {
-      window.clearChart?.();
-      window.resetStatsPanel?.();
-      window.resetReliabilityPanel?.();
+  for (const file of files) {
+    if (!SUPPORTED_CAPTURE_EXTENSION.test(file.name)) {
+      window.notify?.(`Unsupported file type: ${file.name}`, 'warning');
+      errorCount++;
+      continue;
     }
-    refreshDatasetLists();
-
-    const summaryParts = [`Loaded ${successCount} file(s).`];
-    if (renamedCount > 0) summaryParts.push(`Renamed ${renamedCount} duplicate(s).`);
-    if (replacedCount > 0) summaryParts.push(`Replaced ${replacedCount} existing dataset(s).`);
-    if (skippedCount > 0) summaryParts.push(`Skipped ${skippedCount} duplicate(s).`);
-    if (errorCount > 0) summaryParts.push(`${errorCount} file(s) had errors.`);
-    const summary = summaryParts.join(' ');
-    if (typeof window.notify === 'function') {
-      window.notify(summary, errorCount > 0 || skippedCount > 0 ? 'warning' : 'success');
-    } else {
-      console.log(summary);
+    if (file.size >= LARGE_FILE_BYTES) {
+      window.notify?.(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB. It will be parsed in a background worker, but importing and cloning a capture this large can still use substantial memory.`, 'warning');
     }
 
-    // Allow selecting the same file(s) again in the native file input.
-    if (inputElement && 'value' in inputElement) {
-      inputElement.value = '';
-    }
-  }
-
-  for (const file of Array.from(files)) {
     try {
-      const text = await readFileAsText(file);
-      const parsedRows = file.name.toLowerCase().endsWith('.json')
-        ? parseCfxJson(text, file.name)
-        : parseCSV(text);
-
-      if (parsedRows?.error === 'invalid_json') {
-        window.notify?.(`Invalid JSON in ${file.name}: ${parsedRows.message}`, 'error');
-        errorCount++;
-        finishOneFile();
-        continue;
+      const parsed = await parseCaptureFile(file);
+      (parsed.warnings || []).forEach(message => window.notify?.(message, 'warning'));
+      if (parsed?.error === 'invalid_json') {
+        throw new Error(`Invalid JSON: ${parsed.message}`);
       }
-      if (parsedRows.length === 0) {
-        const message = `No valid data rows found in ${file.name}`;
-        if (typeof window.notify === 'function') {
-          window.notify(message, 'warning');
-        } else {
-          console.warn(message);
-        }
-        errorCount++;
-        finishOneFile();
-        continue;
+      if (!parsed?.rows?.length) {
+        throw new Error('No valid data rows were found.');
       }
 
       const duplicate = await resolveDuplicateDataset(file.name);
       if (duplicate.action === 'cancel') {
         skippedCount++;
-        finishOneFile();
         continue;
       }
 
@@ -499,7 +588,8 @@ async function handleFileUpload(e) {
           ? (window.allDatasets[duplicate.existingIndex]?.id ?? window.nextDatasetId++)
           : window.nextDatasetId++,
         name: duplicate.name,
-        rows: parsedRows
+        rows: parsed.rows,
+        source: parsed.metadata || null
       };
 
       if (duplicate.action === 'replace') {
@@ -517,8 +607,24 @@ async function handleFileUpload(e) {
       window.notify?.(`Error parsing ${file.name}: ${error.message}`, 'error');
       errorCount++;
     }
-    finishOneFile();
+    await yieldToMainThread();
   }
+
+  if (replacedCount > 0) {
+    window.clearChart?.();
+    window.resetStatsPanel?.();
+    window.resetReliabilityPanel?.();
+  }
+  refreshDatasetLists();
+
+  const summaryParts = [`Loaded ${successCount} file(s).`];
+  if (renamedCount) summaryParts.push(`Renamed ${renamedCount} duplicate(s).`);
+  if (replacedCount) summaryParts.push(`Replaced ${replacedCount} existing dataset(s).`);
+  if (skippedCount) summaryParts.push(`Skipped ${skippedCount} duplicate(s).`);
+  if (errorCount) summaryParts.push(`${errorCount} file(s) had errors.`);
+  window.notify?.(summaryParts.join(' '), errorCount || skippedCount ? 'warning' : 'success');
+
+  if (inputElement && 'value' in inputElement) inputElement.value = '';
 }
 
 /**
@@ -780,9 +886,9 @@ function updateMetricDropdowns() {
 
 // Short chip labels for the compact stats sidebar.
 const STATS_CHIP_LABELS = {
-  'FPS': 'FPS (Present)',
+  'FPS': 'Legacy FPS (Present)',
   'FrameTime': 'Frame Time (Present)',
-  'RenderedFPS': 'Rendered FPS',
+  'RenderedFPS': 'Rendered FPS (Presented)',
   'DisplayedFPS': 'Displayed FPS',
   'DisplayedFrameTime': 'Displayed Frame Time',
   'Rendered_FTSD': 'Rendered FTSD',
@@ -928,10 +1034,10 @@ function renderStatsMetricGroups(container, metrics) {
 function getMetricDisplayName(metric) {
   const displayNames = {
     'FrameTime': 'Rendered Frame Time (ms)',
-    'FPS': 'FPS (Present / MsBetweenPresents)',
+    'FPS': 'Legacy FPS (Present timing)',
     'DisplayedFrameTime': 'Displayed Frame Time (ms)',
-    'RenderedFPS': 'Rendered FPS (MsBetweenPresents)',
-    'DisplayedFPS': 'Displayed FPS (MsBetweenDisplayChange)',
+    'RenderedFPS': 'Rendered FPS (Presented / MsBetweenPresents)',
+    'DisplayedFPS': 'Displayed FPS (On-screen / MsBetweenDisplayChange)',
     'Rendered_FTSD': 'Rendered Frame Time SD (FTSD)',
     'Displayed_FTSD': 'Displayed Frame Time SD (FTSD)',
     'Rendered_Coefficient_of_Variation': 'Rendered CoV (σ/μ)',
@@ -973,9 +1079,9 @@ function getMetricDescription(metric) {
   const descriptions = {
     'FrameTime': 'Time between app present calls (MsBetweenPresents). Not the same as display cadence - use Displayed FPS for on-screen timing.',
     'FPS': 'Frames per second from present timing (MsBetweenPresents, harmonic mean). Not display-based - use Displayed FPS for what appears on screen.',
-    'RenderedFPS': 'Frames the GPU submitted for presentation.',
-    'DisplayedFPS': 'Frames actually shown on screen. Reveals smoothness loss.',
-    'DisplayedFrameTime': 'Time between actual screen refreshes (MsBetweenDisplayChange).',
+    'RenderedFPS': 'Application Present() rate derived from MsBetweenPresents (1000 / ms). This is rendered/presented cadence, not on-screen image-change cadence.',
+    'DisplayedFPS': 'Actual on-screen image-change rate derived only from MsBetweenDisplayChange (1000 / ms).',
+    'DisplayedFrameTime': 'Time between actual on-screen image changes (MsBetweenDisplayChange).',
     'Rendered_FTSD': 'Standard deviation of rendered (present) frame times. Lower is smoother.',
     'Displayed_FTSD': 'Standard deviation of displayed (on-screen) frame times. Lower is smoother.',
     'Rendered_Coefficient_of_Variation': 'CoV of rendered frame times. Lower is more consistent.',
@@ -1003,6 +1109,10 @@ window.getMetricDescription = getMetricDescription;
 window.removeUploadedDataset = removeUploadedDataset;
 window.clearAllDatasets = clearAllDatasets;
 window.parseCSV = parseCSV;
+window.parseCSVDetailed = parseCSVDetailed;
+window.parseCfxJson = parseCfxJson;
+window.parseCaptureFile = parseCaptureFile;
+window.normaliseRow = normaliseRow;
 window.handleFileUpload = handleFileUpload;
 window.refreshDatasetLists = refreshDatasetLists;
 window.getDatasetIndexById = getDatasetIndexById;
