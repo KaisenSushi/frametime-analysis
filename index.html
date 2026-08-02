@@ -18,9 +18,9 @@
       window.__ftaInitialTheme = theme;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20260802f" />
-  <link rel="stylesheet" href="v2-shell.css?v=20260802f" />
-  <link rel="stylesheet" href="v2-theme.css?v=20260802f" />
+  <link rel="stylesheet" href="style.css?v=20260802longnames" />
+  <link rel="stylesheet" href="v2-shell.css?v=20260802longnames" />
+  <link rel="stylesheet" href="v2-theme.css?v=20260802longnames" />
   <script>
     window.__ftaDependencyFailures = [];
     window.__ftaDependencyFailed = function (name) {
@@ -32,12 +32,12 @@
   <script defer src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.4/build/index.umd.min.js" onerror="window.__ftaDependencyFailed('Box/violin charts')"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js" onerror="window.__ftaDependencyFailed('jStat')"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js" onerror="window.__ftaDependencyFailed('PNG export')"></script>
-  <script defer src="dataManager.js?v=20260802f" onerror="window.__ftaDependencyFailed('Data manager')"></script>
-  <script defer src="statsManager.js?v=20260802f" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
-  <script defer src="chartManager.js?v=20260802f" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
-  <script defer src="reliabilityManager.js?v=20260802f" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
-  <script defer src="main.js?v=20260802f" onerror="window.__ftaDependencyFailed('Application controller')"></script>
-  <script defer src="v2-shell.js?v=20260802f" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
+  <script defer src="dataManager.js?v=20260802longnames" onerror="window.__ftaDependencyFailed('Data manager')"></script>
+  <script defer src="statsManager.js?v=20260802longnames" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
+  <script defer src="chartManager.js?v=20260802longnames" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
+  <script defer src="reliabilityManager.js?v=20260802longnames" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
+  <script defer src="main.js?v=20260802longnames" onerror="window.__ftaDependencyFailed('Application controller')"></script>
+  <script defer src="v2-shell.js?v=20260802longnames" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
 </head>
 
 <body>
@@ -224,7 +224,7 @@
               <div class="viz-panel-head">
                 <h3 id="vizTipsHeading">Tips</h3>
               </div>
-              <p class="v2-tips-text">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.</p>
+              <p class="v2-tips-text">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.</p>
               <p class="v2-tips-text">Select one or more datasets. Select only one when assigning a custom color.</p>
               <p class="v2-tips-text">Histogram can show bins as % of frames. Summary bar defaults match the Statistics workspace.</p>
             </aside>
@@ -251,7 +251,7 @@
               </div>
             </div>
           </div>
-          <p class="viz-chart-hint" id="vizChartHint">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.</p>
+          <p class="viz-chart-hint" id="vizChartHint">Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.</p>
           <div class="chart-container empty" id="chartContainer" aria-describedby="vizChartHint">
             <canvas id="mainChart" role="img" aria-label="Frame timing chart. Select datasets, then add them to the chart."></canvas>
             <div id="vizEmptyChartMessage" class="empty-chart-message">

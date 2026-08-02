@@ -11,6 +11,20 @@ function makeReliabilityAbortError(message = 'Reliability calculation was replac
   return error;
 }
 
+function compactReliabilityLabel(value, maxLength = 52) {
+  const text = String(value ?? '');
+  if (text.length <= maxLength) return text;
+  const left = Math.ceil((maxLength - 1) * 0.62);
+  const right = Math.max(5, maxLength - 1 - left);
+  return `${text.slice(0, left)}…${text.slice(-right)}`;
+}
+
+function generateReliabilityLegendLabels(chart) {
+  const generator = Chart.defaults?.plugins?.legend?.labels?.generateLabels;
+  const labels = typeof generator === 'function' ? generator(chart) : [];
+  return labels.map(item => ({ ...item, text: compactReliabilityLabel(item.text, 56) }));
+}
+
 function getReliabilityThemeColors() {
   const root = getComputedStyle(document.documentElement);
   const read = (name, fallback) => root.getPropertyValue(name).trim() || fallback;
@@ -272,10 +286,12 @@ function renderReliabilityCdfResults(datasets, metric, cdfResults) {
           labels: {
             color: theme.text,
             usePointStyle: true,
-            pointStyle: 'line'
+            pointStyle: 'line',
+            generateLabels: generateReliabilityLegendLabels
           }
         },
         tooltip: {
+          enabled: false,
           backgroundColor: theme.tooltipBg,
           titleColor: theme.tooltipTitle,
           bodyColor: theme.tooltipBody,

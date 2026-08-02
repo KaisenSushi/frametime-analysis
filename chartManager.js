@@ -30,6 +30,24 @@ const CHART_THEME_FALLBACKS = Object.freeze({
   zoomBorder: 'rgba(255,255,255,0.35)'
 });
 
+function compactDatasetLabel(value, maxLength = 52) {
+  const text = String(value ?? '');
+  if (text.length <= maxLength) return text;
+  const extensionMatch = text.match(/(\.[a-z0-9]{1,8})$/i);
+  const extension = extensionMatch?.[1] || '';
+  const body = extension ? text.slice(0, -extension.length) : text;
+  const available = Math.max(12, maxLength - extension.length - 1);
+  const left = Math.ceil(available * 0.62);
+  const right = Math.max(5, available - left);
+  return `${body.slice(0, left)}…${body.slice(-right)}${extension}`;
+}
+
+function generateCompactLegendLabels(chart) {
+  const generator = Chart.defaults?.plugins?.legend?.labels?.generateLabels;
+  const labels = typeof generator === 'function' ? generator(chart) : [];
+  return labels.map(item => ({ ...item, text: compactDatasetLabel(item.text, 56) }));
+}
+
 function readChartCssVariable(name, fallback) {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return value || fallback;
@@ -780,7 +798,13 @@ function buildChartScales(chartType) {
     scales.y = {
       type: 'category',
       grid: { display: false },
-      ticks: { color: theme.text, autoSkip: false },
+      ticks: {
+        color: theme.text,
+        autoSkip: false,
+        callback(value) {
+          return compactDatasetLabel(this.getLabelForValue(value), 34);
+        }
+      },
       border: { color: theme.border }
     };
   } else if (chartType === 'qqplot') {
@@ -884,6 +908,7 @@ function renderChart(chartType, opts = {}) {
       plugins: {
         decimation: false,
         tooltip: {
+          enabled: false,
           backgroundColor: theme.tooltipBg,
           titleColor: theme.tooltipTitle,
           bodyColor: theme.tooltipBody,
@@ -941,7 +966,8 @@ function renderChart(chartType, opts = {}) {
             boxWidth: 14,
             padding: 12,
             usePointStyle: true,
-            pointStyle: 'line'
+            pointStyle: 'line',
+            generateLabels: generateCompactLegendLabels
           }
         },
         zoom: chartType === 'summarybar' ? false : buildZoomOptions()

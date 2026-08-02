@@ -448,6 +448,13 @@ function populateAllDatasetSelects() {
     const currentValues = getDatasetPickerValues(picker);
     const hasInitializedSelection = picker.dataset.selectionInitialized === 'true';
     const autoSelectAll = !hasInitializedSelection && currentValues.length === 0;
+    let knownDatasetIds = new Set();
+    try {
+      const parsedKnownIds = JSON.parse(picker.dataset.knownDatasetIds || '[]');
+      if (Array.isArray(parsedKnownIds)) knownDatasetIds = new Set(parsedKnownIds.map(String));
+    } catch (_) {
+      knownDatasetIds = new Set();
+    }
     const focusedCheckboxValue = document.activeElement instanceof HTMLInputElement &&
       document.activeElement.type === 'checkbox' &&
       picker.contains(document.activeElement)
@@ -462,7 +469,8 @@ function populateAllDatasetSelects() {
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.value = String(dataset.id ?? dataset.name ?? id);
-      input.checked = autoSelectAll || currentValues.includes(input.value);
+      const isNewDataset = !knownDatasetIds.has(input.value);
+      input.checked = autoSelectAll || currentValues.includes(input.value) || isNewDataset;
       input.setAttribute('aria-label', `Select ${dataset.name}`);
 
       const colorDot = document.createElement('span');
@@ -473,7 +481,6 @@ function populateAllDatasetSelects() {
       const name = document.createElement('span');
       name.className = 'dataset-option-name';
       name.textContent = dataset.name;
-      name.title = dataset.name;
 
       label.classList.toggle('is-selected', input.checked);
       label.setAttribute('data-selected', String(input.checked));
@@ -504,8 +511,12 @@ function populateAllDatasetSelects() {
     updateDatasetPickerCount(picker);
     if (datasets.length) {
       picker.dataset.selectionInitialized = 'true';
+      picker.dataset.knownDatasetIds = JSON.stringify(
+        datasets.map((dataset, index) => String(dataset.id ?? dataset.name ?? index))
+      );
     } else {
       delete picker.dataset.selectionInitialized;
+      delete picker.dataset.knownDatasetIds;
     }
 
     if (focusedCheckboxValue !== null) {

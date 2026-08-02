@@ -3813,3 +3813,100 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Long dataset names stay inside their panel instead of overlapping adjacent
+   controls. Selection colors are intentionally unchanged. */
+#appShellV2 .v2-setup-columns > .viz-panel,
+#appShellV2 .chart-builder,
+#appShellV2 .stats-dataset-picker,
+#appShellV2 .stats-dataset-option,
+#appShellV2 .dataset-list li {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#appShellV2 .stats-dataset-option,
+#appShellV2 .dataset-list li {
+  overflow: hidden;
+}
+
+#appShellV2 .dataset-option-name,
+#appShellV2 .dataset-list-name {
+  flex: 1 1 0%;
+  width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compact statistics columns. More datasets/statistics use horizontal scrolling
+   rather than stretching a small number of cells across the viewport. */
+#appShellV2 .table-wrap,
+#appShellV2 .stats-aggregate-table-wrap {
+  overflow: auto;
+}
+
+#appShellV2 .stats-table {
+  width: max-content;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+#appShellV2 .stats-table .stats-metric-cell {
+  width: clamp(190px, 15vw, 230px);
+  min-width: clamp(190px, 15vw, 230px);
+  max-width: clamp(190px, 15vw, 230px);
+}
+
+#appShellV2 #statsTable .dataset-name-cell {
+  width: clamp(180px, 16vw, 250px);
+  min-width: clamp(180px, 16vw, 250px);
+  max-width: clamp(180px, 16vw, 250px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#appShellV2 #statsTable thead th:not(.stats-corner),
+#appShellV2 #statsTable td {
+  width: clamp(112px, 9vw, 145px);
+  min-width: clamp(112px, 9vw, 145px);
+  max-width: clamp(112px, 9vw, 145px);
+}
+
+#appShellV2 .stats-aggregate-table .stats-dataset-header,
+#appShellV2 .stats-aggregate-table .stats-aggregate-value {
+  width: clamp(170px, 15vw, 230px);
+  min-width: clamp(170px, 15vw, 230px);
+  max-width: clamp(170px, 15vw, 230px);
+}
+
+#appShellV2 .stats-dataset-header {
+  overflow: hidden;
+}
+
+#appShellV2 .stats-header-name {
+  display: inline-block;
+  max-width: calc(100% - 22px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* Smoothness descriptions no longer force very tall rows with mostly empty
+   value cells. Full descriptions remain available in exports. */
+#appShellV2 .stats-aggregate-hint {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+#appShellV2 .stats-aggregate-table th,
+#appShellV2 .stats-aggregate-table td {
+  padding-block: 9px;
+}

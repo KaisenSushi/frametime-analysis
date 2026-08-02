@@ -1936,6 +1936,7 @@ async function updateStatsTableCore(calculationToken = statsCalculationToken) {
         nameCell.scope = 'row';
         nameCell.style.setProperty('--stripe', dsStats.color || getDatasetColor(dsIndex));
         nameCell.textContent = dsStats.name;
+        nameCell.setAttribute('aria-label', dsStats.name);
         row.appendChild(nameCell);
 
         selectedStats.forEach(stat => {
@@ -2046,7 +2047,7 @@ function renderAggregateStatsTable(aggregateMetrics, selectedDatasets, exportSta
     const th = document.createElement('th');
     th.className = 'stats-dataset-header';
     th.scope = 'col';
-    th.title = ds.name;
+    th.setAttribute('aria-label', ds.name);
 
     const stripe = document.createElement('span');
     stripe.className = 'stats-header-stripe';
