@@ -678,13 +678,14 @@
 #appShellV2 .stats-dataset-option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 8px;
   width: 100%;
   max-width: 100%;
-  min-height: 36px;
-  padding: 8px 2px;
+  min-height: 38px;
+  padding: 8px 6px;
   border: 0;
+  border-bottom: 1px solid var(--v2-border-subtle);
   border-radius: 0;
   background: transparent;
   color: var(--v2-text);
@@ -692,7 +693,11 @@
   font-weight: 400;
   font-family: var(--v2-font);
   cursor: pointer;
-  transition: background 100ms var(--v2-ease);
+  transition: background 100ms var(--v2-ease), box-shadow 100ms var(--v2-ease), color 100ms var(--v2-ease);
+}
+
+#appShellV2 .stats-dataset-option:last-child {
+  border-bottom-color: transparent;
 }
 
 #appShellV2 .stats-dataset-option:hover {
@@ -701,17 +706,34 @@
 
 #appShellV2 .stats-dataset-option.is-selected,
 #appShellV2 .stats-dataset-option:has(input:checked) {
-  border-color: transparent;
-  background: transparent;
+  background: rgb(255 255 255 / 0.055);
   color: var(--v2-ink);
   font-weight: 500;
-  box-shadow: none;
+  box-shadow: inset 2px 0 0 var(--v2-accent-muted);
 }
 
-#appShellV2 .stats-dataset-option span {
-  flex: 1;
-  min-width: 0;
+#appShellV2 .stats-dataset-option.is-selected:hover,
+#appShellV2 .stats-dataset-option:has(input:checked):hover {
+  background: rgb(255 255 255 / 0.085);
+}
+
+#appShellV2 .dataset-option-color {
   order: 1;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.16);
+}
+
+#appShellV2 .dataset-option-name {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #appShellV2 .stats-dataset-option input {
@@ -728,7 +750,9 @@
   accent-color: var(--v2-accent-muted);
   cursor: pointer;
   position: relative;
-  transition: background 120ms var(--v2-ease), border-color 120ms var(--v2-ease);
+  opacity: 1;
+  pointer-events: auto;
+  transition: background 120ms var(--v2-ease), border-color 120ms var(--v2-ease), box-shadow 120ms var(--v2-ease);
 }
 
 #appShellV2 .stats-dataset-option input::before {
@@ -748,6 +772,7 @@
 #appShellV2 .stats-dataset-option input:checked {
   background: var(--v2-accent-muted);
   border-color: var(--v2-accent-muted);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.12);
 }
 
 #appShellV2 .stats-dataset-option input:checked::before {
@@ -761,6 +786,13 @@
 #appShellV2 .stats-dataset-option input:focus-visible {
   outline: 2px solid var(--v2-accent-muted);
   outline-offset: 2px;
+}
+
+#appShellV2 .dataset-selection-count {
+  color: var(--v2-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
 }
 
 #appShellV2 .stats-link,

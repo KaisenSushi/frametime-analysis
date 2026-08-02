@@ -246,8 +246,35 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+const DATASET_PICKER_COUNT_IDS = Object.freeze({
+  datasetSelect: 'vizDatasetCount',
+  statDatasetSelect: 'statsDatasetCount',
+  reliabilityDatasetSelect: 'reliabilityDatasetCount'
+});
+
+function updateDatasetPickerCount(pickerOrId) {
+  const picker = typeof pickerOrId === 'string'
+    ? document.getElementById(pickerOrId)
+    : pickerOrId;
+  if (!picker) return;
+
+  const inputs = Array.from(picker.querySelectorAll('input[type="checkbox"]'));
+  const selectedCount = inputs.reduce((count, input) => count + Number(input.checked), 0);
+  const totalCount = inputs.length;
+  const countElement = document.getElementById(DATASET_PICKER_COUNT_IDS[picker.id]);
+  if (!countElement) return;
+
+  countElement.textContent = `${selectedCount}/${totalCount} selected`;
+  countElement.setAttribute(
+    'aria-label',
+    `${selectedCount} of ${totalCount} dataset${totalCount === 1 ? '' : 's'} selected`
+  );
+}
+
 // Populate all dataset checkbox pickers.
 function populateAllDatasetSelects() {
+  window.assignDatasetColors?.();
+
   const pickers = [
     document.getElementById('datasetSelect'),
     document.getElementById('statDatasetSelect'),
@@ -276,12 +303,20 @@ function populateAllDatasetSelects() {
       input.value = String(dataset.id ?? dataset.name ?? id);
       input.checked = autoSelectAll || currentValues.includes(input.value);
 
+      const colorDot = document.createElement('span');
+      colorDot.className = 'dataset-option-color';
+      colorDot.setAttribute('aria-hidden', 'true');
+      colorDot.style.backgroundColor = dataset.color || window.getBenchmarkColor?.(id) || '#888888';
+
       const name = document.createElement('span');
+      name.className = 'dataset-option-name';
       name.textContent = dataset.name;
+      name.title = dataset.name;
 
       label.classList.toggle('is-selected', input.checked);
       input.addEventListener('change', () => {
         label.classList.toggle('is-selected', input.checked);
+        updateDatasetPickerCount(picker);
         if (picker.id === 'reliabilityDatasetSelect') {
           if (typeof window.updateMetricDropdowns === 'function') {
             window.updateMetricDropdowns();
@@ -297,10 +332,12 @@ function populateAllDatasetSelects() {
         }
       });
 
-      label.appendChild(input);
+      label.appendChild(colorDot);
       label.appendChild(name);
+      label.appendChild(input);
       picker.appendChild(label);
     });
+    updateDatasetPickerCount(picker);
     if (datasets.length) {
       picker.dataset.selectionInitialized = 'true';
     } else {
@@ -346,6 +383,7 @@ function setDatasetPickerAll(pickerOrId, selected) {
     input.checked = selected;
     input.closest('.stats-dataset-option')?.classList.toggle('is-selected', selected);
   });
+  updateDatasetPickerCount(picker);
 }
 
 // Show/hide visualization controls based on chart type.
@@ -728,6 +766,7 @@ function notify(msg, type = 'info') {
 // Export notify to the global scope
 window.notify = notify;
 window.populateAllDatasetSelects = populateAllDatasetSelects;
+window.updateDatasetPickerCount = updateDatasetPickerCount;
 window.getDatasetPickerValues = getDatasetPickerValues;
 window.getDatasetPickerIndices = getDatasetPickerIndices;
 window.setDatasetPickerAll = setDatasetPickerAll;
