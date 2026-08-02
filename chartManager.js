@@ -236,23 +236,55 @@ function buildSummaryBarChart(indices, metric, statKeys) {
     };
   });
 
-  adjustSummaryBarHeight(indices.length);
+  adjustSummaryBarHeight(indices.length, statKeys.length);
 }
 
-function adjustSummaryBarHeight(datasetCount) {
+function getSummaryBarRequiredHeight(datasetCount, statCount) {
+  const categories = Math.max(1, Number(datasetCount) || 0);
+  const series = Math.max(1, Number(statCount) || 0);
+
+  // Chart.js divides each dataset category among every selected statistic.
+  // Reserve enough vertical room for readable bars, category labels and legend.
+  const pixelsPerBarSlot = 18;
+  const categoryGap = 12;
+  const chartChrome = 110;
+  return Math.max(
+    320,
+    Math.ceil(chartChrome + categories * (series * pixelsPerBarSlot + categoryGap))
+  );
+}
+
+function adjustSummaryBarHeight(datasetCount, statCount) {
   const chartContainer = document.getElementById('chartContainer');
   const range = document.getElementById('chartHeight');
   if (!chartContainer) return;
-  const autoMin = Math.max(280, 72 + datasetCount * 48);
-  chartContainer.style.minHeight = autoMin + 'px';
-  if (range && +range.value < autoMin) {
-    range.value = String(Math.min(900, autoMin));
+
+  const requiredHeight = getSummaryBarRequiredHeight(datasetCount, statCount);
+  let targetHeight = requiredHeight;
+
+  if (range) {
+    const currentMax = Number(range.max) || 900;
+    if (requiredHeight > currentMax) {
+      // Extend the control only when the comparison needs it. This avoids
+      // silently clipping larger summary charts while preserving the normal UI.
+      range.max = String(Math.min(1800, Math.ceil(requiredHeight / 100) * 100));
+    }
+
+    targetHeight = Math.min(requiredHeight, Number(range.max) || requiredHeight);
+    if (Number(range.value) < targetHeight) {
+      range.value = String(targetHeight);
+    }
     range.setAttribute('aria-valuetext', `${range.value} pixels`);
-    chartContainer.style.height = range.value + 'px';
+
     const heightValSpan = document.getElementById('chartHeightValue');
-    if (heightValSpan) heightValSpan.textContent = range.value + 'px';
-    if (window.mainChart) window.mainChart.resize();
+    if (heightValSpan) heightValSpan.textContent = `${range.value}px`;
+    chartContainer.style.height = `${range.value}px`;
+  } else {
+    chartContainer.style.height = `${targetHeight}px`;
   }
+
+  chartContainer.style.minHeight = `${targetHeight}px`;
+  if (window.mainChart) window.mainChart.resize();
 }
 
 // Cap rendered points so large captures stay responsive.
