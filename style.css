@@ -3956,7 +3956,7 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
 }
 
 #appShellV2 .analysis-board-setup-hint {
-  margin: 2px 0 0;
+  margin: 10px 0 2px;
   padding: 9px 10px;
   border: 1px solid var(--v2-border-subtle);
   border-radius: var(--v2-radius-sm);

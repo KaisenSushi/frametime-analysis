@@ -1076,6 +1076,7 @@ let analysisBoardCharts = [];
 let analysisBoardDatasetIndices = [];
 let analysisBoardConfig = null;
 let analysisBoardRebuildTimer = null;
+let analysisBoardThresholdTimer = null;
 let analysisBoardCardCounter = 0;
 window.analysisBoardReady = false;
 
@@ -1434,11 +1435,14 @@ function renderAnalysisBoardCardShells() {
       typeChoices
     );
     typeSelect.dataset.cardId = card.id;
+    const cardMetricChoices = card.type === 'advanced'
+      ? metricChoices.filter(choice => !isBoardFpsMetric(choice.value))
+      : metricChoices;
     const metricSelect = makeBoardSelect(
       'analysis-board-card-select analysis-board-card-metric',
       `Metric for card ${index + 1}`,
       card.metric,
-      metricChoices
+      cardMetricChoices
     );
     metricSelect.dataset.cardId = card.id;
 
@@ -1583,7 +1587,7 @@ function buildBoardCardChart(card, elements, entries) {
     elements.canvas.classList.add('hidden');
     const panel = document.createElement('div');
     panel.className = 'analysis-board-advanced';
-    panel.setAttribute('role', 'table');
+    panel.setAttribute('role', 'region');
     panel.setAttribute('aria-label', `${metricLabel} advanced metrics with ${threshold.toFixed(2)} millisecond spike threshold`);
     entries.forEach(entry => {
       const sorted = Array.from(entry.values).sort((a, b) => a - b);
@@ -2020,7 +2024,13 @@ function setupAnalysisBoardCustomization() {
     const cardId = target.dataset.cardId;
     const numeric = Number(target.value);
     if (!cardId || !Number.isFinite(numeric) || numeric <= 0) return;
-    updateAnalysisBoardCard(cardId, { thresholdMs: Math.min(1000, Math.max(0.01, numeric)) });
+    const card = ensureAnalysisBoardConfig().cards.find(item => item.id === cardId);
+    if (!card) return;
+    card.thresholdMs = Math.min(1000, Math.max(0.01, numeric));
+    saveAnalysisBoardConfig();
+    updateAnalysisBoardPresetControl();
+    clearTimeout(analysisBoardThresholdTimer);
+    analysisBoardThresholdTimer = setTimeout(scheduleAnalysisBoardRebuild, 600);
   });
 
   grid?.addEventListener('click', event => {
