@@ -1371,9 +1371,8 @@ function syncVisualizationResultUi(mode = visualizationResultMode) {
   if (boardExportButton) boardExportButton.disabled = !window.analysisBoardReady || !window.htmlToImage;
   heightControl?.classList.toggle('hidden', boardMode);
   if (hint) {
-    hint.textContent = boardMode
-      ? 'This report is view-only. Return to Setup to change its title, preset, cards, or spike threshold.'
-      : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.';
+    hint.classList.toggle('hidden', boardMode);
+    hint.textContent = 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.';
   }
   updateAnalysisBoardPresetControl();
 }
