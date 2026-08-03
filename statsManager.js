@@ -439,24 +439,24 @@ function calculateStatistics(arr, metricName = '', options = {}) {
   const c01  = Math.max(1, Math.ceil(n * 0.001));    // 0.1 %
   const c001 = Math.max(1, Math.ceil(n * 0.0001));   // 0.01 %
 
-  let low1, low01, low001, high1, high01;
+  let low1, low01, low001;
 
   if (isFpsMetric) {
     // Worst FPS = smallest values; best FPS = largest values.
     low1   = sorted.slice(0, c1).  reduce((s, v) => s + v, 0) / c1;
     low01  = sorted.slice(0, c01). reduce((s, v) => s + v, 0) / c01;
     low001 = sorted.slice(0, c001).reduce((s, v) => s + v, 0) / c001;
-    high1  = sorted.slice(-c1).    reduce((s, v) => s + v, 0) / c1;
-    high01 = sorted.slice(-c01).   reduce((s, v) => s + v, 0) / c01;
   } else {
     // Worst frame times = largest values; best frame times = smallest values.
     const desc = [...sorted].reverse();
     low1   = desc.slice(0, c1).  reduce((s, v) => s + v, 0) / c1;
     low01  = desc.slice(0, c01). reduce((s, v) => s + v, 0) / c01;
     low001 = desc.slice(0, c001).reduce((s, v) => s + v, 0) / c001;
-    high1  = sorted.slice(0, c1).  reduce((s, v) => s + v, 0) / c1;
-    high01 = sorted.slice(0, c01). reduce((s, v) => s + v, 0) / c01;
   }
+
+  // High percentile cutoffs use their conventional percentile positions.
+  const high1 = calculatePercentile(sorted, 99);
+  const high01 = calculatePercentile(sorted, 99.9);
 
   /* -------- return -------------------------------------------------- */
   return {
@@ -930,7 +930,6 @@ function workerCalculateStatistics(values, metricName) {
   const c001 = Math.max(1, Math.ceil(n * 0.0001));
   const meanSlice = slice => slice.reduce((total, value) => total + value, 0) / slice.length;
   const worst = isFps ? sorted : sorted.slice().reverse();
-  const best = isFps ? sorted.slice().reverse() : sorted;
   return {
     max: sorted[n - 1],
     min: sorted[0],
@@ -944,8 +943,8 @@ function workerCalculateStatistics(values, metricName) {
     low1: meanSlice(worst.slice(0, c1)),
     low01: meanSlice(worst.slice(0, c01)),
     low001: meanSlice(worst.slice(0, c001)),
-    high1: meanSlice(best.slice(0, c1)),
-    high01: meanSlice(best.slice(0, c01))
+    high1: workerPercentile(sorted, 99),
+    high01: workerPercentile(sorted, 99.9)
   };
 }
 
@@ -2172,8 +2171,8 @@ function getStatDisplayName(stat, metrics = []) {
     low1: '1% Low',
     low01: '0.1% Low',
     low001: '0.01% Low',
-    high1: 'Best 1% mean',
-    high01: 'Best 0.1% mean'
+    high1: '99%ile',
+    high01: '99.9%ile'
   };
 
   return displayNames[stat] || stat;
@@ -2199,8 +2198,8 @@ function getStatDescription(stat, metrics = []) {
     'low1': 'Average of the worst 1% of samples.',
     'low01': 'Average of the worst 0.1% of samples.',
     'low001': 'Average of the worst 0.01% of samples.',
-    'high1': 'Average of the best 1% of samples (fastest frames / highest FPS).',
-    'high01': 'Average of the best 0.1% of samples (fastest frames / highest FPS).'
+    'high1': '99th-percentile cutoff.',
+    'high01': '99.9th-percentile cutoff.'
   };
   return descriptions[stat] || '';
 }

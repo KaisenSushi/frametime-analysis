@@ -1080,7 +1080,7 @@ let analysisBoardThresholdTimer = null;
 let analysisBoardCardCounter = 0;
 window.analysisBoardReady = false;
 
-const ANALYSIS_BOARD_STORAGE_KEY = 'fta-analysis-board-config-v1';
+const ANALYSIS_BOARD_STORAGE_KEY = 'fta-analysis-board-config-v2';
 const ANALYSIS_BOARD_MAX_CARDS = 6;
 const ANALYSIS_BOARD_CARD_TYPES = Object.freeze({
   timeline: { label: 'Timeline', description: 'Sampled values over the capture.' },
@@ -1096,6 +1096,23 @@ const ANALYSIS_BOARD_FALLBACK_METRICS = [
   'FrameTime', 'RenderedFPS', 'DisplayedFrameTime', 'DisplayedFPS',
   'MsBetweenPresents', 'MsBetweenDisplayChange', 'MsGPUBusy', 'MsUntilDisplayed'
 ];
+
+const ANALYSIS_BOARD_SETUP_OPTIONS = Object.freeze([
+  { key: 'frametime-timeline', label: 'Frame-time timeline', type: 'timeline', metric: 'FrameTime' },
+  { key: 'fps-timeline', label: 'Rendered FPS timeline', type: 'timeline', metric: 'RenderedFPS' },
+  { key: 'displayed-fps-timeline', label: 'Displayed FPS timeline', type: 'timeline', metric: 'DisplayedFPS' },
+  { key: 'frametime-scatter', label: 'Frame-time scatter', type: 'scatter', metric: 'FrameTime' },
+  { key: 'fps-scatter', label: 'Rendered FPS scatter', type: 'scatter', metric: 'RenderedFPS' },
+  { key: 'frametime-histogram', label: 'Frame-time histogram', type: 'histogram', metric: 'FrameTime' },
+  { key: 'fps-percentile', label: 'Rendered FPS percentile curve', type: 'percentile', metric: 'RenderedFPS' },
+  { key: 'displayed-fps-percentile', label: 'Displayed FPS percentile curve', type: 'percentile', metric: 'DisplayedFPS' },
+  { key: 'frametime-percentile', label: 'Frame-time percentile curve', type: 'percentile', metric: 'FrameTime' },
+  { key: 'fps-boxplot', label: 'Rendered FPS box plot', type: 'boxplot', metric: 'RenderedFPS' },
+  { key: 'displayed-fps-boxplot', label: 'Displayed FPS box plot', type: 'boxplot', metric: 'DisplayedFPS' },
+  { key: 'frametime-boxplot', label: 'Frame-time box plot', type: 'boxplot', metric: 'FrameTime' },
+  { key: 'fps-summary', label: 'Rendered FPS summary', type: 'summary', metric: 'RenderedFPS' },
+  { key: 'advanced-frametime', label: 'Advanced frame-time metrics', type: 'advanced', metric: 'FrameTime' }
+]);
 
 const ANALYSIS_BOARD_EXCLUDED_METRICS = new Set([
   'Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD',
@@ -1123,8 +1140,8 @@ const ANALYSIS_BOARD_PRESETS = Object.freeze({
   ],
   consistency: [
     { id: 'consistency-timeline', type: 'timeline', metric: 'FrameTime' },
-    { id: 'consistency-percentile', type: 'percentile', metric: 'FrameTime' },
     { id: 'consistency-histogram', type: 'histogram', metric: 'FrameTime' },
+    { id: 'consistency-percentile', type: 'percentile', metric: 'FrameTime' },
     { id: 'consistency-box', type: 'boxplot', metric: 'FrameTime' }
   ],
   renderedDisplayed: [
@@ -1147,9 +1164,7 @@ function createBoardCardId() {
 }
 
 function normalizeBoardCards(cards) {
-  const source = Array.isArray(cards) && cards.length
-    ? cards
-    : ANALYSIS_BOARD_PRESETS.performance;
+  const source = Array.isArray(cards) ? cards : ANALYSIS_BOARD_PRESETS.performance;
   const seen = new Set();
   const normalized = [];
   source.slice(0, ANALYSIS_BOARD_MAX_CARDS).forEach((card, index) => {
@@ -1167,7 +1182,7 @@ function normalizeBoardCards(cards) {
       : 16.67;
     normalized.push({ id, type, metric, thresholdMs });
   });
-  return normalized.length ? normalized : cloneBoardCards(ANALYSIS_BOARD_PRESETS.performance);
+  return normalized;
 }
 
 function cardsMatchPreset(cards, presetCards) {
@@ -1203,7 +1218,7 @@ function saveAnalysisBoardConfig() {
   if (!analysisBoardConfig) return;
   try {
     localStorage.setItem(ANALYSIS_BOARD_STORAGE_KEY, JSON.stringify({
-      version: 1,
+      version: 2,
       cards: analysisBoardConfig.cards.map(({ id, type, metric, thresholdMs }) => ({ id, type, metric, thresholdMs }))
     }));
   } catch (error) {
@@ -1234,14 +1249,49 @@ function getBoardMetricChoices() {
   return options;
 }
 
+function renderAnalysisBoardSetupChoices() {
+  const container = document.getElementById('analysisBoardCardChoices');
+  if (!container || container.childElementCount) return;
+  ANALYSIS_BOARD_SETUP_OPTIONS.forEach(option => {
+    const label = document.createElement('label');
+    label.className = 'analysis-board-choice';
+    label.htmlFor = `analysisBoardChoice-${option.key}`;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = `analysisBoardChoice-${option.key}`;
+    input.dataset.boardOption = option.key;
+    const text = document.createElement('span');
+    text.textContent = option.label;
+    label.append(input, text);
+    container.appendChild(label);
+  });
+}
+
 function updateAnalysisBoardPresetControl() {
+  renderAnalysisBoardSetupChoices();
+  const config = ensureAnalysisBoardConfig();
   const presetSelect = document.getElementById('analysisBoardPresetSelect');
   if (presetSelect) presetSelect.value = detectAnalysisBoardPreset();
-  const addButton = document.getElementById('analysisBoardAddCardBtn');
-  if (addButton) {
-    const atLimit = ensureAnalysisBoardConfig().cards.length >= ANALYSIS_BOARD_MAX_CARDS;
-    addButton.disabled = atLimit;
-    addButton.title = atLimit ? `Maximum ${ANALYSIS_BOARD_MAX_CARDS} cards` : 'Add another chart card';
+
+  const selectedPairs = new Set(config.cards.map(card => `${card.type}\u0000${card.metric}`));
+  const choiceInputs = Array.from(document.querySelectorAll('#analysisBoardCardChoices input[data-board-option]'));
+  choiceInputs.forEach(input => {
+    const option = ANALYSIS_BOARD_SETUP_OPTIONS.find(item => item.key === input.dataset.boardOption);
+    input.checked = Boolean(option && selectedPairs.has(`${option.type}\u0000${option.metric}`));
+  });
+  const selectedCount = choiceInputs.filter(input => input.checked).length;
+  choiceInputs.forEach(input => {
+    input.disabled = !input.checked && selectedCount >= ANALYSIS_BOARD_MAX_CARDS;
+  });
+
+  const count = document.getElementById('analysisBoardCardCount');
+  if (count) count.textContent = `${selectedCount}/${ANALYSIS_BOARD_MAX_CARDS} selected`;
+  const advancedCard = config.cards.find(card => card.type === 'advanced' && card.metric === 'FrameTime');
+  const thresholdWrap = document.getElementById('analysisBoardThresholdWrap');
+  thresholdWrap?.classList.toggle('hidden', !advancedCard);
+  const thresholdInput = document.getElementById('analysisBoardSpikeThreshold');
+  if (thresholdInput && advancedCard && document.activeElement !== thresholdInput) {
+    thresholdInput.value = String(advancedCard.thresholdMs || 16.67);
   }
 }
 
@@ -1294,7 +1344,7 @@ function syncVisualizationResultUi(mode = visualizationResultMode) {
   heightControl?.classList.toggle('hidden', boardMode);
   if (hint) {
     hint.textContent = boardMode
-      ? 'Choose a preset or customize each card. Card changes rebuild the board using the selected datasets.'
+      ? 'This report is view-only. Return to Setup to change its title, preset, cards, or spike threshold.'
       : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Use the legend to toggle series.';
   }
   updateAnalysisBoardPresetControl();
@@ -1403,9 +1453,6 @@ function renderAnalysisBoardCardShells() {
   if (!grid) return new Map();
   grid.innerHTML = '';
   const cards = ensureAnalysisBoardConfig().cards;
-  const metricChoices = getBoardMetricChoices();
-  const typeChoices = Object.entries(ANALYSIS_BOARD_CARD_TYPES)
-    .map(([value, def]) => ({ value, label: def.label }));
   const elements = new Map();
 
   cards.forEach((card, index) => {
@@ -1424,59 +1471,7 @@ function renderAnalysisBoardCardShells() {
     description.textContent = text.description;
     copy.append(heading, description);
 
-    const controls = document.createElement('div');
-    controls.className = 'analysis-board-card-controls';
-    controls.classList.toggle('has-spike-threshold', card.type === 'advanced');
-    controls.setAttribute('data-export-exclude', 'true');
-    const typeSelect = makeBoardSelect(
-      'analysis-board-card-select analysis-board-card-type',
-      `Chart type for card ${index + 1}`,
-      card.type,
-      typeChoices
-    );
-    typeSelect.dataset.cardId = card.id;
-    const cardMetricChoices = card.type === 'advanced'
-      ? metricChoices.filter(choice => !isBoardFpsMetric(choice.value))
-      : metricChoices;
-    const metricSelect = makeBoardSelect(
-      'analysis-board-card-select analysis-board-card-metric',
-      `Metric for card ${index + 1}`,
-      card.metric,
-      cardMetricChoices
-    );
-    metricSelect.dataset.cardId = card.id;
-
-    const makeAction = (action, textContent, ariaLabel, disabled = false) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'analysis-board-card-action';
-      button.dataset.cardAction = action;
-      button.dataset.cardId = card.id;
-      button.textContent = textContent;
-      button.setAttribute('aria-label', ariaLabel);
-      button.disabled = disabled;
-      return button;
-    };
-    controls.append(typeSelect, metricSelect);
-    if (card.type === 'advanced') {
-      const threshold = document.createElement('input');
-      threshold.type = 'number';
-      threshold.className = 'analysis-board-card-select analysis-board-spike-threshold';
-      threshold.dataset.cardId = card.id;
-      threshold.min = '0.01';
-      threshold.max = '1000';
-      threshold.step = '0.01';
-      threshold.value = String(card.thresholdMs || 16.67);
-      threshold.setAttribute('aria-label', `Spike threshold in milliseconds for card ${index + 1}`);
-      threshold.title = 'Spike threshold (ms)';
-      controls.appendChild(threshold);
-    }
-    controls.append(
-      makeAction('up', '↑', `Move card ${index + 1} up`, index === 0),
-      makeAction('down', '↓', `Move card ${index + 1} down`, index === cards.length - 1),
-      makeAction('remove', '×', `Remove card ${index + 1}`, cards.length <= 1)
-    );
-    header.append(copy, controls);
+    header.appendChild(copy);
 
     const canvasWrap = document.createElement('div');
     canvasWrap.className = 'analysis-board-canvas-wrap';
@@ -1942,7 +1937,10 @@ function applyAnalysisBoardPreset(name) {
   }
 
   updateAnalysisBoardPresetControl();
-  if (window.analysisBoardReady) scheduleAnalysisBoardRebuild();
+  if (window.analysisBoardReady) {
+    destroyAnalysisBoard();
+    syncVisualizationResultUi('board');
+  }
 }
 
 function addAnalysisBoardCard() {
@@ -1994,52 +1992,54 @@ function removeAnalysisBoardCard(cardId) {
 function setupAnalysisBoardCustomization() {
   ensureAnalysisBoardConfig();
   const presetSelect = document.getElementById('analysisBoardPresetSelect');
-  const addButton = document.getElementById('analysisBoardAddCardBtn');
-  const grid = document.getElementById('analysisBoardGrid');
+  const choices = document.getElementById('analysisBoardCardChoices');
+  const thresholdInput = document.getElementById('analysisBoardSpikeThreshold');
 
   presetSelect?.addEventListener('change', () => {
     if (presetSelect.value === 'custom') return;
     applyAnalysisBoardPreset(presetSelect.value);
   });
-  addButton?.addEventListener('click', addAnalysisBoardCard);
 
-  grid?.addEventListener('change', event => {
+  choices?.addEventListener('change', event => {
     const target = event.target;
-    if (!(target instanceof HTMLSelectElement) && !(target instanceof HTMLInputElement)) return;
-    const cardId = target.dataset.cardId;
-    if (!cardId) return;
-    if (target.classList.contains('analysis-board-card-type')) {
-      updateAnalysisBoardCard(cardId, { type: target.value });
-    } else if (target.classList.contains('analysis-board-card-metric')) {
-      updateAnalysisBoardCard(cardId, { metric: target.value });
-    } else if (target.classList.contains('analysis-board-spike-threshold')) {
-      const thresholdMs = Math.min(1000, Math.max(0.01, Number(target.value) || 16.67));
-      updateAnalysisBoardCard(cardId, { thresholdMs });
+    if (!(target instanceof HTMLInputElement) || !target.matches('input[data-board-option]')) return;
+    const previousThreshold = ensureAnalysisBoardConfig().cards.find(card => card.type === 'advanced')?.thresholdMs || 16.67;
+    const checked = new Set(Array.from(
+      choices.querySelectorAll('input[data-board-option]:checked'),
+      input => input.dataset.boardOption
+    ));
+    analysisBoardConfig = {
+      cards: ANALYSIS_BOARD_SETUP_OPTIONS
+        .filter(option => checked.has(option.key))
+        .slice(0, ANALYSIS_BOARD_MAX_CARDS)
+        .map(option => ({
+          id: `setup-${option.key}`,
+          type: option.type,
+          metric: option.metric,
+          thresholdMs: option.type === 'advanced' ? previousThreshold : 16.67
+        }))
+    };
+    saveAnalysisBoardConfig();
+    updateAnalysisBoardPresetControl();
+    if (window.analysisBoardReady) {
+      destroyAnalysisBoard();
+      syncVisualizationResultUi('board');
     }
   });
 
-  grid?.addEventListener('input', event => {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement) || !target.classList.contains('analysis-board-spike-threshold')) return;
-    const cardId = target.dataset.cardId;
-    const numeric = Number(target.value);
-    if (!cardId || !Number.isFinite(numeric) || numeric <= 0) return;
-    const card = ensureAnalysisBoardConfig().cards.find(item => item.id === cardId);
+  thresholdInput?.addEventListener('input', () => {
+    const numeric = Number(thresholdInput.value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return;
+    const card = ensureAnalysisBoardConfig().cards.find(item => item.type === 'advanced' && item.metric === 'FrameTime');
     if (!card) return;
     card.thresholdMs = Math.min(1000, Math.max(0.01, numeric));
     saveAnalysisBoardConfig();
-    updateAnalysisBoardPresetControl();
-    clearTimeout(analysisBoardThresholdTimer);
-    analysisBoardThresholdTimer = setTimeout(scheduleAnalysisBoardRebuild, 600);
-  });
-
-  grid?.addEventListener('click', event => {
-    const button = event.target.closest?.('[data-card-action]');
-    if (!button) return;
-    const cardId = button.dataset.cardId;
-    if (button.dataset.cardAction === 'up') moveAnalysisBoardCard(cardId, -1);
-    if (button.dataset.cardAction === 'down') moveAnalysisBoardCard(cardId, 1);
-    if (button.dataset.cardAction === 'remove') removeAnalysisBoardCard(cardId);
+    const preset = document.getElementById('analysisBoardPresetSelect');
+    if (preset) preset.value = detectAnalysisBoardPreset();
+    if (window.analysisBoardReady) {
+      destroyAnalysisBoard();
+      syncVisualizationResultUi('board');
+    }
   });
 
   document.addEventListener('datasetsUpdated', () => {

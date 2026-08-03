@@ -3955,15 +3955,95 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   display: contents;
 }
 
-#appShellV2 .analysis-board-setup-hint {
+#appShellV2 .analysis-board-setup-panel {
   margin: 10px 0 2px;
-  padding: 9px 10px;
+  padding: 12px;
   border: 1px solid var(--v2-border-subtle);
   border-radius: var(--v2-radius-sm);
   background: var(--v2-field);
   color: var(--v2-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+#appShellV2 .analysis-board-setup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+#appShellV2 .analysis-board-setup-panel .analysis-board-title-input,
+#appShellV2 .analysis-board-setup-panel .analysis-board-preset-select {
+  width: 100%;
+  max-width: none;
+}
+
+#appShellV2 .analysis-board-choice-fieldset {
+  min-width: 0;
+  margin: 13px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+#appShellV2 .analysis-board-choice-fieldset legend {
+  margin: 0 0 6px;
+  padding: 0;
+  color: var(--v2-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#appShellV2 .analysis-board-card-choices {
+  display: grid;
+  gap: 5px;
+}
+
+#appShellV2 .analysis-board-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--v2-border-subtle);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface-soft, var(--v2-field));
+  color: var(--v2-text);
+  cursor: pointer;
+}
+
+#appShellV2 .analysis-board-choice:hover {
+  border-color: var(--v2-accent-muted);
+}
+
+#appShellV2 .analysis-board-choice:has(input:checked) {
+  border-color: var(--v2-accent-muted);
+  background: var(--v2-accent-soft, var(--v2-field));
+  color: var(--v2-ink);
+}
+
+#appShellV2 .analysis-board-choice:has(input:disabled) {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+#appShellV2 .analysis-board-choice input {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--v2-accent);
+}
+
+#appShellV2 .analysis-board-choice span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#appShellV2 .analysis-board-setup-copy {
+  margin: 10px 0 0;
+  color: var(--v2-muted);
 }
 
 #appShellV2 .analysis-board {

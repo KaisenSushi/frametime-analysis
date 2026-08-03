@@ -18,9 +18,9 @@
       window.__ftaInitialTheme = theme;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20260803final" />
-  <link rel="stylesheet" href="v2-shell.css?v=20260803final" />
-  <link rel="stylesheet" href="v2-theme.css?v=20260803final" />
+  <link rel="stylesheet" href="style.css?v=20260803setupboard" />
+  <link rel="stylesheet" href="v2-shell.css?v=20260803setupboard" />
+  <link rel="stylesheet" href="v2-theme.css?v=20260803setupboard" />
   <script>
     window.__ftaDependencyFailures = [];
     window.__ftaDependencyFailed = function (name) {
@@ -32,12 +32,12 @@
   <script defer src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.4/build/index.umd.min.js" onerror="window.__ftaDependencyFailed('Box/violin charts')"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js" onerror="window.__ftaDependencyFailed('jStat')"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js" onerror="window.__ftaDependencyFailed('PNG export')"></script>
-  <script defer src="dataManager.js?v=20260803final" onerror="window.__ftaDependencyFailed('Data manager')"></script>
-  <script defer src="statsManager.js?v=20260803final" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
-  <script defer src="chartManager.js?v=20260803final" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
-  <script defer src="reliabilityManager.js?v=20260803final" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
-  <script defer src="main.js?v=20260803final" onerror="window.__ftaDependencyFailed('Application controller')"></script>
-  <script defer src="v2-shell.js?v=20260803final" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
+  <script defer src="dataManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Data manager')"></script>
+  <script defer src="statsManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
+  <script defer src="chartManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
+  <script defer src="reliabilityManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
+  <script defer src="main.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Application controller')"></script>
+  <script defer src="v2-shell.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
 </head>
 
 <body>
@@ -224,9 +224,34 @@
                 Show bins as % of frames
               </label>
               </div>
-              <div id="analysisBoardSetupHint" class="analysis-board-setup-hint hidden">
-                Builds a customizable multi-chart report. Choose a preset, then edit, add, remove, or reorder cards in Results.
-              </div>
+              <section id="analysisBoardSetupHint" class="analysis-board-setup-panel hidden" aria-labelledby="analysisBoardSetupHeading">
+                <div class="viz-panel-subhead analysis-board-setup-head">
+                  <span id="analysisBoardSetupHeading">Analysis board</span>
+                  <span id="analysisBoardCardCount" class="dataset-selection-count" aria-live="polite">0 selected</span>
+                </div>
+                <div class="viz-field-row">
+                  <label class="viz-field" for="analysisBoardTitleInput">Report title</label>
+                  <input id="analysisBoardTitleInput" class="analysis-board-title-input" type="text" maxlength="80" value="Performance overview" autocomplete="off" />
+                </div>
+                <div class="viz-field-row">
+                  <label class="viz-field" for="analysisBoardPresetSelect">Preset</label>
+                  <select id="analysisBoardPresetSelect" class="analysis-board-preset-select" aria-label="Analysis board preset">
+                    <option value="performance">Performance overview</option>
+                    <option value="consistency">Frame-time consistency</option>
+                    <option value="renderedDisplayed">Rendered vs displayed</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+                <fieldset class="analysis-board-choice-fieldset">
+                  <legend>Report cards</legend>
+                  <div id="analysisBoardCardChoices" class="analysis-board-card-choices"></div>
+                </fieldset>
+                <div id="analysisBoardThresholdWrap" class="viz-field-row hidden">
+                  <label class="viz-field" for="analysisBoardSpikeThreshold">Spike threshold (ms)</label>
+                  <input id="analysisBoardSpikeThreshold" type="number" min="0.01" max="1000" step="0.01" value="16.67" inputmode="decimal" />
+                </div>
+                <p class="analysis-board-setup-copy">Choose up to six cards here, then build the finished report. Results contains no editing controls.</p>
+              </section>
               <div class="viz-actions">
                 <button id="addToChartBtn" class="accent-button" type="button">Add to chart</button>
                 <button id="clearChartBtn" class="secondary-button" disabled type="button">Clear chart</button>
@@ -256,17 +281,7 @@
               <span id="chartStatusLine" class="chart-status-line" aria-live="polite"></span>
               <button id="resetZoomBtn" class="secondary-button mini" type="button" disabled>Reset zoom</button>
               <button id="exportChartPngBtn" class="secondary-button mini" type="button">Export PNG</button>
-              <div id="analysisBoardToolbar" class="analysis-board-toolbar hidden" aria-label="Analysis board controls">
-                <label for="analysisBoardTitleInput">Report title</label>
-                <input id="analysisBoardTitleInput" class="analysis-board-title-input" type="text" maxlength="80" value="Performance overview" autocomplete="off" />
-                <label for="analysisBoardPresetSelect">Preset</label>
-                <select id="analysisBoardPresetSelect" class="analysis-board-preset-select" aria-label="Analysis board preset">
-                  <option value="performance">Performance overview</option>
-                  <option value="consistency">Frame-time consistency</option>
-                  <option value="renderedDisplayed">Rendered vs displayed</option>
-                  <option value="custom">Custom</option>
-                </select>
-                <button id="analysisBoardAddCardBtn" class="secondary-button mini" type="button">Add card</button>
+              <div id="analysisBoardToolbar" class="analysis-board-toolbar hidden" aria-label="Analysis board export">
                 <button id="exportAnalysisBoardPngBtn" class="secondary-button mini" type="button" disabled>Export board PNG</button>
               </div>
               <div class="chart-height-control">
@@ -347,8 +362,8 @@
                 <button type="button" class="toggle-button active" data-stat="low1" aria-pressed="true">1% Low</button>
                 <button type="button" class="toggle-button active" data-stat="low01" aria-pressed="true">0.1% Low</button>
                 <button type="button" class="toggle-button" data-stat="low001" aria-pressed="false">0.01% Low</button>
-                <button type="button" class="toggle-button" data-stat="high1" aria-pressed="false">Best 1% mean</button>
-                <button type="button" class="toggle-button" data-stat="high01" aria-pressed="false">Best 0.1% mean</button>
+                <button type="button" class="toggle-button" data-stat="high1" aria-pressed="false">99%ile</button>
+                <button type="button" class="toggle-button" data-stat="high01" aria-pressed="false">99.9%ile</button>
                 <button type="button" class="toggle-button active" data-stat="stdev" aria-pressed="true">STDEV</button>
               </div>
               <button id="calculateStatsBtn" class="accent-button stats-calc-btn" type="button">Calculate statistics</button>
