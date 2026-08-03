@@ -117,6 +117,9 @@ function syncLiveChartColors() {
     if (!ds?.color) return;
     const color = ds.color;
 
+    // Heatmap colors encode severity, not dataset identity.
+    if (cfg.chartRole === 'stutterHeatmap') return;
+
     if (cfg.qqRole === 'reference') {
       cfg.borderColor = hexToRgba(color, 0.9);
       cfg.backgroundColor = hexToRgba(color, 0.9);
@@ -317,6 +320,11 @@ function adjustSummaryBarHeight(datasetCount, statCount) {
 const MAX_LINE_SCATTER_POINTS = 4500;
 const MAX_DISTRIBUTION_POINTS = 6000;
 const MAX_QQ_POINTS = 3000;
+const MAX_ROLLING_POINTS = 1200;
+const MAX_HEATMAP_WINDOWS = 160;
+const MAX_AUTOCORRELATION_SAMPLES = 40000;
+const MAX_AUTOCORRELATION_LAG = 300;
+const STUTTER_THRESHOLD_MS = 16.67;
 
 /**
  * Largest-Triangle-Three-Buckets downsampling - preserves visual shape of line data.
@@ -438,6 +446,133 @@ function getLineScatterPoints(dataset, metric) {
   // duplicate a large capture in memory.
   dataset._pointCache = { metric, result };
   return result;
+}
+
+function isFrameTimeSeriesMetric(metric) {
+  return metric === 'FrameTime' || metric === 'DisplayedFrameTime' || /^Ms/i.test(metric || '');
+}
+
+function quantileFromSortedValues(sorted, probability) {
+  if (!sorted.length) return NaN;
+  const position = Math.max(0, Math.min(1, probability)) * (sorted.length - 1);
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  const fraction = position - lower;
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * fraction;
+}
+
+/** Automatic rolling average/P95/P99 series, capped for responsive rendering. */
+function buildRollingFrameTime(values) {
+  const clean = values.filter(Number.isFinite);
+  if (clean.length < 3) return null;
+
+  const windowSize = Math.min(clean.length, Math.max(3, Math.min(1000, Math.round(clean.length / 200))));
+  const availableWindows = clean.length - windowSize + 1;
+  const starts = sampleIndices(availableWindows, Math.min(MAX_ROLLING_POINTS, availableWindows));
+  const average = [];
+  const p95 = [];
+  const p99 = [];
+
+  starts.forEach(start => {
+    const windowValues = clean.slice(start, start + windowSize);
+    const sorted = windowValues.slice().sort((a, b) => a - b);
+    const sum = windowValues.reduce((total, value) => total + value, 0);
+    const x = start + windowSize;
+    average.push({ x, y: sum / windowSize });
+    p95.push({ x, y: quantileFromSortedValues(sorted, 0.95) });
+    p99.push({ x, y: quantileFromSortedValues(sorted, 0.99) });
+  });
+
+  return { average, p95, p99, windowSize, totalFrames: clean.length, displayedWindows: starts.length };
+}
+
+function mixRgb(from, to, amount) {
+  const t = Math.max(0, Math.min(1, amount));
+  const channel = index => Math.round(from[index] + (to[index] - from[index]) * t);
+  return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
+}
+
+function getStutterSeverityColor(severity) {
+  const cool = [59, 130, 246];
+  const warning = [245, 158, 11];
+  const severe = [239, 68, 68];
+  if (severity <= 1) return mixRgb(cool, warning, Math.max(0, (severity - 0.75) / 0.25));
+  return mixRgb(warning, severe, Math.min(1, severity - 1));
+}
+
+/** One colored point per time window; color represents P99/max/spike severity. */
+function buildStutterHeatmap(values, row, threshold = STUTTER_THRESHOLD_MS) {
+  const clean = values.filter(Number.isFinite);
+  if (!clean.length) return null;
+
+  const desiredWindows = Math.min(MAX_HEATMAP_WINDOWS, Math.max(1, Math.ceil(Math.sqrt(clean.length) * 1.5)));
+  const windowSize = Math.max(1, Math.ceil(clean.length / desiredWindows));
+  const points = [];
+  const colors = [];
+
+  for (let start = 0; start < clean.length; start += windowSize) {
+    const end = Math.min(clean.length, start + windowSize);
+    const windowValues = clean.slice(start, end);
+    const sorted = windowValues.slice().sort((a, b) => a - b);
+    const p99 = quantileFromSortedValues(sorted, 0.99);
+    const max = sorted[sorted.length - 1];
+    const spikeCount = windowValues.reduce((count, value) => count + (value > threshold ? 1 : 0), 0);
+    const spikeRate = spikeCount / windowValues.length;
+    const severity = Math.max(p99 / threshold, max / (threshold * 2), spikeRate * 3);
+    points.push({
+      x: start + (end - start) / 2,
+      y: row,
+      startFrame: start + 1,
+      endFrame: end,
+      p99,
+      max,
+      spikeCount,
+      spikeRate,
+      threshold
+    });
+    colors.push(getStutterSeverityColor(severity));
+  }
+
+  return { points, colors, windowSize, totalFrames: clean.length, displayedWindows: points.length };
+}
+
+/** Normalized autocorrelation. Large captures are evenly sampled before analysis. */
+function buildAutocorrelation(values) {
+  const clean = values.filter(Number.isFinite);
+  if (clean.length < 8) return null;
+
+  const stride = Math.max(1, Math.ceil(clean.length / MAX_AUTOCORRELATION_SAMPLES));
+  const sampled = [];
+  for (let i = 0; i < clean.length; i += stride) sampled.push(clean[i]);
+  if (sampled.length < 8) return null;
+
+  const mean = sampled.reduce((sum, value) => sum + value, 0) / sampled.length;
+  let varianceSum = 0;
+  for (let i = 0; i < sampled.length; i++) {
+    const centered = sampled[i] - mean;
+    varianceSum += centered * centered;
+  }
+  if (!(varianceSum > 0)) return null;
+
+  const maxLag = Math.min(MAX_AUTOCORRELATION_LAG, Math.floor(sampled.length / 4));
+  const points = [{ x: 0, y: 1 }];
+  for (let lag = 1; lag <= maxLag; lag++) {
+    let covariance = 0;
+    for (let i = lag; i < sampled.length; i++) {
+      covariance += (sampled[i] - mean) * (sampled[i - lag] - mean);
+    }
+    const correlation = Math.max(-1, Math.min(1, covariance / varianceSum));
+    points.push({ x: lag * stride, y: correlation });
+  }
+
+  return {
+    points,
+    stride,
+    analyzedSamples: sampled.length,
+    totalFrames: clean.length,
+    maxLagFrames: maxLag * stride
+  };
 }
 
 function buildLineScatterPoints(rows, metric) {
@@ -826,6 +961,35 @@ function buildChartScales(chartType) {
       scales.y.min = extents.yMin;
       scales.y.max = extents.yMax;
     }
+  } else if (chartType === 'rolling') {
+    scales.x = styleLinearAxis({ grid: { display: false } }, 'Frame #');
+    scales.y = styleLinearAxis({}, 'Frame time (ms)');
+    const extents = computeSeriesExtents(window.chartDatasets);
+    if (extents) {
+      if (extents.xMin !== undefined) scales.x.min = extents.xMin;
+      if (extents.xMax !== undefined) scales.x.max = extents.xMax;
+      scales.y.min = extents.yMin;
+      scales.y.max = extents.yMax;
+    }
+  } else if (chartType === 'stutterheatmap') {
+    scales.x = styleLinearAxis({ grid: { display: false } }, 'Frame #');
+    const datasetIndices = window.chartDatasets
+      .filter(dataset => dataset.chartRole === 'stutterHeatmap')
+      .map(dataset => dataset.sourceDatasetIndex)
+      .filter(Number.isInteger);
+    const minIndex = datasetIndices.length ? Math.min(...datasetIndices) : 0;
+    const maxIndex = datasetIndices.length ? Math.max(...datasetIndices) : 0;
+    scales.y = styleLinearAxis({ min: minIndex - 0.5, max: maxIndex + 0.5 }, 'Dataset');
+    scales.y.grid.display = false;
+    scales.y.ticks.stepSize = 1;
+    scales.y.ticks.autoSkip = false;
+    scales.y.ticks.callback = value => {
+      if (!Number.isInteger(value) || !datasetIndices.includes(value)) return '';
+      return compactDatasetLabel(getDatasetLabel(window.allDatasets?.[value]), 28);
+    };
+  } else if (chartType === 'autocorrelation') {
+    scales.x = styleLinearAxis({ grid: { display: false }, min: 0 }, 'Lag (frames)');
+    scales.y = styleLinearAxis({ min: -1, max: 1 }, 'Correlation');
   } else if (chartType === 'scatter' || chartType === 'line') {
     scales.x = styleLinearAxis({ grid: { display: false } }, xTitle);
     scales.y = styleLinearAxis({}, yTitle);
@@ -916,7 +1080,7 @@ function renderChart(chartType, opts = {}) {
       plugins: {
         decimation: false,
         tooltip: {
-          enabled: false,
+          enabled: ['rolling', 'stutterheatmap', 'autocorrelation'].includes(chartType),
           backgroundColor: theme.tooltipBg,
           titleColor: theme.tooltipTitle,
           bodyColor: theme.tooltipBody,
@@ -936,6 +1100,30 @@ function renderChart(chartType, opts = {}) {
                 ];
               }
               const ds = ctx.dataset;
+              if (window.currentChartType === 'stutterheatmap') {
+                const raw = ctx.raw;
+                if (raw && Number.isFinite(raw.p99)) {
+                  return [
+                    ds.label,
+                    `Frames ${raw.startFrame.toLocaleString()}-${raw.endFrame.toLocaleString()}`,
+                    `P99: ${raw.p99.toFixed(2)} ms`,
+                    `Max: ${raw.max.toFixed(2)} ms`,
+                    `Spikes > ${raw.threshold.toFixed(2)} ms: ${raw.spikeCount} (${(raw.spikeRate * 100).toFixed(1)}%)`
+                  ];
+                }
+              }
+              if (window.currentChartType === 'autocorrelation') {
+                const raw = ctx.raw;
+                if (raw && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
+                  return [ds.label, `Lag: ${raw.x.toLocaleString()} frames`, `Correlation: ${raw.y.toFixed(3)}`];
+                }
+              }
+              if (window.currentChartType === 'rolling') {
+                const raw = ctx.raw;
+                if (raw && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
+                  return [ds.label, `Frame: ${Math.round(raw.x).toLocaleString()}`, `${raw.y.toFixed(2)} ms`];
+                }
+              }
               if (window.currentChartType === 'qqplot') {
                 const raw = ctx.raw;
                 if (raw && typeof raw === 'object' && Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
@@ -1020,7 +1208,12 @@ function renderChart(chartType, opts = {}) {
   try {
     window.mainChart = new Chart(ctx, cfg);
     const metricLabel = window.getMetricDisplayName?.(window.currentChartMetric) || window.currentChartMetric;
-    canvas.setAttribute('aria-label', `${chartType} chart for ${metricLabel || 'the selected metric'}. ${window.chartDatasets.length} series shown.`);
+    const chartTypeLabel = {
+      rolling: 'Rolling frame-time',
+      stutterheatmap: 'Stutter heatmap',
+      autocorrelation: 'Autocorrelation'
+    }[chartType] || chartType;
+    canvas.setAttribute('aria-label', `${chartTypeLabel} chart for ${metricLabel || 'the selected metric'}. ${window.chartDatasets.length} series shown.`);
     setResetZoomEnabled(false);
   } catch (err) {
     console.error('Chart render failed:', err);
@@ -1063,6 +1256,33 @@ function updateChartStatusLine() {
     }
     if (total > 0) {
       el.textContent = `${total.toLocaleString()} frames`;
+      return;
+    }
+  }
+
+  if (window.currentChartType === 'rolling') {
+    const sample = datasets.find(dataset => dataset.chartRole === 'rollingAverage');
+    if (sample?.rollingWindows && sample?.totalPoints) {
+      el.textContent = `${sample.rollingWindows.toLocaleString()} rolling windows from ${sample.totalPoints.toLocaleString()} frames`;
+      return;
+    }
+  }
+
+  if (window.currentChartType === 'stutterheatmap') {
+    const windows = datasets.reduce((sum, dataset) => sum + (dataset.heatmapWindows || 0), 0);
+    if (windows > 0) {
+      el.textContent = `${windows.toLocaleString()} time windows · blue is smooth, amber/red marks stutter`;
+      return;
+    }
+  }
+
+  if (window.currentChartType === 'autocorrelation') {
+    const sample = datasets.find(dataset => dataset.autocorrelationSamples);
+    if (sample) {
+      const sampledText = sample.autocorrelationStride > 1
+        ? `${sample.autocorrelationSamples.toLocaleString()} sampled frames`
+        : `${sample.autocorrelationSamples.toLocaleString()} frames`;
+      el.textContent = `${sampledText} · lags through ${sample.autocorrelationMaxLag.toLocaleString()} frames`;
       return;
     }
   }
@@ -2235,6 +2455,23 @@ function getChartOrderEntries(qqPairsCache = null) {
     }));
   }
 
+  if (chartType === 'rolling') {
+    const groups = new Map();
+    window.chartDatasets.forEach((dataset, chartIndex) => {
+      if (!Number.isInteger(dataset.sourceDatasetIndex)) return;
+      if (!groups.has(dataset.sourceDatasetIndex)) {
+        groups.set(dataset.sourceDatasetIndex, {
+          kind: 'seriesGroup',
+          datasetIndex: dataset.sourceDatasetIndex,
+          chartIndices: [],
+          label: getDatasetLabel(window.allDatasets[dataset.sourceDatasetIndex])
+        });
+      }
+      groups.get(dataset.sourceDatasetIndex).chartIndices.push(chartIndex);
+    });
+    return Array.from(groups.values()).map((entry, orderIndex) => ({ ...entry, orderIndex }));
+  }
+
   return (window.chartDatasets || []).map((dataset, chartIndex) => ({
     kind: 'series',
     orderIndex: chartIndex,
@@ -2287,6 +2524,11 @@ function addToChartCore(generation) {
 
   const metric    = document.getElementById('metricSelect').value;
   const chartType = document.getElementById('chartTypeSelect').value;
+
+  if (['rolling', 'stutterheatmap', 'autocorrelation'].includes(chartType) && !isFrameTimeSeriesMetric(metric)) {
+    window.notify?.('Choose a frame-time metric for this chart.', 'warning');
+    return;
+  }
 
   if (typeof window.assignDatasetColors === 'function') {
     window.assignDatasetColors();
@@ -2446,7 +2688,109 @@ function addToChartCore(generation) {
 
     let cfg;
 
-    if (chartType === 'line' || chartType === 'scatter') {
+    if (chartType === 'rolling') {
+      const rolling = buildRollingFrameTime(vals);
+      if (!rolling) {
+        window.notify?.(`${getDatasetLabel(ds)}: need at least 3 valid frame-time values.`, 'warning');
+        return;
+      }
+
+      const seriesColor = ds.color || getBenchmarkColor(idx);
+      const common = {
+        type: 'scatter',
+        borderColor: seriesColor,
+        backgroundColor: seriesColor,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHitRadius: 5,
+        showLine: true,
+        spanGaps: true,
+        fill: false,
+        parsing: false,
+        sourceDatasetIndex: idx,
+        sourceMetric: metric,
+        totalPoints: rolling.totalFrames,
+        rollingWindows: rolling.displayedWindows,
+        rollingWindowSize: rolling.windowSize
+      };
+      const datasetLabel = getDatasetLabel(ds);
+      window.chartDatasets.push(
+        {
+          ...common,
+          label: `${datasetLabel} · Moving average`,
+          data: rolling.average,
+          chartRole: 'rollingAverage'
+        },
+        {
+          ...common,
+          label: `${datasetLabel} · Rolling P95`,
+          data: rolling.p95,
+          borderDash: [8, 4],
+          chartRole: 'rollingP95'
+        },
+        {
+          ...common,
+          label: `${datasetLabel} · Rolling P99`,
+          data: rolling.p99,
+          borderDash: [3, 3],
+          chartRole: 'rollingP99'
+        }
+      );
+      return;
+    }
+
+    if (chartType === 'stutterheatmap') {
+      const heatmap = buildStutterHeatmap(vals, idx);
+      if (!heatmap) return;
+      const pointSize = heatmap.displayedWindows <= 40 ? 9 : heatmap.displayedWindows <= 80 ? 7 : 5;
+      cfg = {
+        label: getDatasetLabel(ds),
+        type: 'scatter',
+        data: heatmap.points,
+        backgroundColor: heatmap.colors,
+        borderColor: heatmap.colors,
+        pointRadius: pointSize,
+        pointHoverRadius: pointSize + 2,
+        pointHitRadius: pointSize + 2,
+        pointStyle: 'rectRounded',
+        showLine: false,
+        parsing: false,
+        chartRole: 'stutterHeatmap',
+        sourceDatasetIndex: idx,
+        sourceMetric: metric,
+        heatmapWindows: heatmap.displayedWindows,
+        heatmapWindowSize: heatmap.windowSize,
+        totalPoints: heatmap.totalFrames
+      };
+    } else if (chartType === 'autocorrelation') {
+      const autocorrelation = buildAutocorrelation(vals);
+      if (!autocorrelation) {
+        window.notify?.(`${getDatasetLabel(ds)}: need at least 8 varying frame-time values.`, 'warning');
+        return;
+      }
+      const seriesColor = ds.color || getBenchmarkColor(idx);
+      cfg = {
+        label: getDatasetLabel(ds),
+        type: 'scatter',
+        data: autocorrelation.points,
+        borderColor: seriesColor,
+        backgroundColor: seriesColor,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHitRadius: 5,
+        showLine: true,
+        spanGaps: true,
+        fill: false,
+        parsing: false,
+        chartRole: 'autocorrelation',
+        sourceDatasetIndex: idx,
+        sourceMetric: metric,
+        autocorrelationSamples: autocorrelation.analyzedSamples,
+        autocorrelationStride: autocorrelation.stride,
+        autocorrelationMaxLag: autocorrelation.maxLagFrames,
+        totalPoints: autocorrelation.totalFrames
+      };
+    } else if (chartType === 'line' || chartType === 'scatter') {
       const seriesResult = getLineScatterPoints(ds, metric);
       const { points, totalPoints, displayedPoints } = seriesResult;
       if (!points.length) return;
@@ -2609,6 +2953,14 @@ function moveDataset(orderIndex, direction) {
   if (entry.kind === 'series' && other.kind === 'series') {
     swapChartDatasetsAt(entry.chartIndex, other.chartIndex);
     refreshChartAfterOrderChange();
+    return;
+  }
+
+  if (entry.kind === 'seriesGroup' && other.kind === 'seriesGroup') {
+    const groups = entries.map(group => group.chartIndices.map(index => window.chartDatasets[index]));
+    [groups[orderIndex], groups[swapWith]] = [groups[swapWith], groups[orderIndex]];
+    window.chartDatasets = groups.flat();
+    refreshChartAfterOrderChange();
   }
 }
 
@@ -2651,6 +3003,16 @@ function removeChartSeries(orderIndex) {
       return;
     }
     refreshChartAfterOrderChange();
+    return;
+  }
+
+  if (entry.kind === 'seriesGroup') {
+    window.chartDatasets = window.chartDatasets.filter(dataset => dataset.sourceDatasetIndex !== entry.datasetIndex);
+    if (!window.chartDatasets.length) {
+      clearChart();
+      return;
+    }
+    refreshChartAfterOrderChange();
   }
 }
 
@@ -2669,6 +3031,8 @@ function updateDatasetOrder () {
   entries.forEach((entry, index) => {
     const dataset = entry.kind === 'series'
       ? window.chartDatasets[entry.chartIndex]
+      : entry.kind === 'seriesGroup'
+        ? window.chartDatasets[entry.chartIndices[0]]
       : entry.kind === 'qq'
         ? qqPairs[entry.orderIndex]?.datasets[0]
         : window.chartDatasets.find(d => Array.isArray(d.sourceDatasetIndices));

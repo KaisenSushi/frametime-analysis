@@ -638,6 +638,11 @@ function updateVizControlsForChartType() {
   const type = document.getElementById('chartTypeSelect')?.value;
   const isSummary = type === 'summarybar';
   const isHistogram = type === 'histogram';
+  const chartHints = {
+    rolling: 'Automatic moving average, rolling P95, and rolling P99. Use a frame-time metric.',
+    stutterheatmap: 'Automatic time windows. Blue is smooth; amber and red highlight stutter. Use a frame-time metric.',
+    autocorrelation: 'Shows repeating frame-time patterns by lag. Strong peaks can indicate periodic stutter.'
+  };
 
   document.getElementById('vizBarStatsPanel')?.classList.toggle('hidden', !isSummary);
   document.querySelector('.viz-color-row')?.classList.toggle('hidden', isSummary);
@@ -645,11 +650,11 @@ function updateVizControlsForChartType() {
 
   const hint = document.querySelector('.viz-chart-hint');
   if (hint) {
-    hint.textContent = isSummary
+    hint.textContent = chartHints[type] || (isSummary
       ? 'Rounded bars with values shown on each bar. Pick stats above, then Build summary bar.'
       : isHistogram
         ? 'Shared bins across overlays. Use "% of frames" when capture lengths differ.'
-        : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.';
+        : 'Drag to pan. Ctrl+scroll or Ctrl+drag to zoom. Double-click chart to reset. Click legend to toggle series.');
   }
 
   if (typeof window.syncVisualizationActionLabels === 'function') {
