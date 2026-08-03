@@ -449,7 +449,25 @@ function getLineScatterPoints(dataset, metric) {
 }
 
 function isFrameTimeSeriesMetric(metric) {
-  return metric === 'FrameTime' || metric === 'DisplayedFrameTime' || /^Ms/i.test(metric || '');
+  return ['FrameTime', 'MsBetweenPresents', 'DisplayedFrameTime', 'MsBetweenDisplayChange']
+    .includes(metric || '');
+}
+
+function ensureFrameTimeMetricForAdvancedChart() {
+  const select = document.getElementById('metricSelect');
+  if (!select) return '';
+  if (isFrameTimeSeriesMetric(select.value)) return select.value;
+
+  const options = Array.from(select.options).filter(option => !option.disabled);
+  const preferred = ['FrameTime', 'MsBetweenPresents', 'DisplayedFrameTime', 'MsBetweenDisplayChange'];
+  const replacement = preferred
+    .map(value => options.find(option => option.value === value))
+    .find(Boolean) || options.find(option => isFrameTimeSeriesMetric(option.value));
+
+  if (!replacement) return '';
+  select.value = replacement.value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  return replacement.value;
 }
 
 function quantileFromSortedValues(sorted, probability) {
@@ -2522,12 +2540,15 @@ function addToChartCore(generation) {
     return;
   }
 
-  const metric    = document.getElementById('metricSelect').value;
   const chartType = document.getElementById('chartTypeSelect').value;
+  let metric = document.getElementById('metricSelect').value;
 
-  if (['rolling', 'stutterheatmap', 'autocorrelation'].includes(chartType) && !isFrameTimeSeriesMetric(metric)) {
-    window.notify?.('Choose a frame-time metric for this chart.', 'warning');
-    return;
+  if (['rolling', 'stutterheatmap', 'autocorrelation'].includes(chartType)) {
+    metric = ensureFrameTimeMetricForAdvancedChart();
+    if (!metric) {
+      window.notify?.('This dataset does not contain a usable frame-time series.', 'warning');
+      return;
+    }
   }
 
   if (typeof window.assignDatasetColors === 'function') {
@@ -3251,6 +3272,7 @@ window.BENCHMARK_COLORS = BENCHMARK_COLORS;
 window.assignDatasetColors = assignDatasetColors;
 window.buildHistogram = buildHistogram;
 window.buildQQPlot = buildQQPlot;
+window.ensureFrameTimeMetricForAdvancedChart = ensureFrameTimeMetricForAdvancedChart;
 window.renderChart = renderChart;
 window.rebuildCurrentHistogramDatasets = rebuildCurrentHistogramDatasets;
 window.syncLiveChartColors = syncLiveChartColors;

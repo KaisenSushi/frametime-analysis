@@ -638,6 +638,7 @@ function updateVizControlsForChartType() {
   const type = document.getElementById('chartTypeSelect')?.value;
   const isSummary = type === 'summarybar';
   const isHistogram = type === 'histogram';
+  const isAdvancedFrameTimeChart = ['rolling', 'stutterheatmap', 'autocorrelation'].includes(type);
   const chartHints = {
     rolling: 'Automatic moving average, rolling P95, and rolling P99. Use a frame-time metric.',
     stutterheatmap: 'Automatic time windows. Blue is smooth; amber and red highlight stutter. Use a frame-time metric.',
@@ -647,6 +648,10 @@ function updateVizControlsForChartType() {
   document.getElementById('vizBarStatsPanel')?.classList.toggle('hidden', !isSummary);
   document.querySelector('.viz-color-row')?.classList.toggle('hidden', isSummary);
   document.getElementById('histogramDensityWrap')?.classList.toggle('hidden', !isHistogram);
+
+  if (isAdvancedFrameTimeChart) {
+    window.ensureFrameTimeMetricForAdvancedChart?.();
+  }
 
   const hint = document.querySelector('.viz-chart-hint');
   if (hint) {
