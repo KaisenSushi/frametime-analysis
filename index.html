@@ -18,9 +18,9 @@
       window.__ftaInitialTheme = theme;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=20260803setupboard" />
-  <link rel="stylesheet" href="v2-shell.css?v=20260803setupboard" />
-  <link rel="stylesheet" href="v2-theme.css?v=20260803setupboard" />
+  <link rel="stylesheet" href="style.css?v=20260803multiboard" />
+  <link rel="stylesheet" href="v2-shell.css?v=20260803multiboard" />
+  <link rel="stylesheet" href="v2-theme.css?v=20260803multiboard" />
   <script>
     window.__ftaDependencyFailures = [];
     window.__ftaDependencyFailed = function (name) {
@@ -32,12 +32,12 @@
   <script defer src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.4/build/index.umd.min.js" onerror="window.__ftaDependencyFailed('Box/violin charts')"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jstat/1.9.6/jstat.min.js" onerror="window.__ftaDependencyFailed('jStat')"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js" onerror="window.__ftaDependencyFailed('PNG export')"></script>
-  <script defer src="dataManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Data manager')"></script>
-  <script defer src="statsManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
-  <script defer src="chartManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
-  <script defer src="reliabilityManager.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
-  <script defer src="main.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Application controller')"></script>
-  <script defer src="v2-shell.js?v=20260803setupboard" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
+  <script defer src="dataManager.js?v=20260803multiboard" onerror="window.__ftaDependencyFailed('Data manager')"></script>
+  <script defer src="statsManager.js?v=20260803multiboard" onerror="window.__ftaDependencyFailed('Statistics manager')"></script>
+  <script defer src="chartManager.js?v=20260803multiboard" onerror="window.__ftaDependencyFailed('Chart manager')"></script>
+  <script defer src="reliabilityManager.js?v=20260803multiboard" onerror="window.__ftaDependencyFailed('Reliability manager')"></script>
+  <script defer src="main.js?v=20260803multiboard" onerror="window.__ftaDependencyFailed('Application controller')"></script>
+  <script defer src="v2-shell.js?v=20260803multiboard" onerror="window.__ftaDependencyFailed('Workspace shell')"></script>
 </head>
 
 <body>
@@ -224,34 +224,23 @@
                 Show bins as % of frames
               </label>
               </div>
-              <section id="analysisBoardSetupHint" class="analysis-board-setup-panel hidden" aria-labelledby="analysisBoardSetupHeading">
-                <div class="viz-panel-subhead analysis-board-setup-head">
-                  <span id="analysisBoardSetupHeading">Analysis board</span>
-                  <span id="analysisBoardCardCount" class="dataset-selection-count" aria-live="polite">0 selected</span>
+              <div id="analysisBoardSetupHint" class="analysis-board-multi-controls hidden">
+                <div class="viz-field-row">
+                  <span class="viz-field" id="analysisBoardMetricsLabel">Metrics</span>
+                  <details id="analysisBoardMetricsDropdown" class="analysis-board-multi-select" aria-labelledby="analysisBoardMetricsLabel">
+                    <summary id="analysisBoardMetricSummary">Frame Time</summary>
+                    <div id="analysisBoardMetricOptions" class="analysis-board-multi-menu" role="group" aria-label="Analysis board metrics"></div>
+                  </details>
                 </div>
                 <div class="viz-field-row">
-                  <label class="viz-field" for="analysisBoardTitleInput">Report title</label>
-                  <input id="analysisBoardTitleInput" class="analysis-board-title-input" type="text" maxlength="80" value="Performance overview" autocomplete="off" />
+                  <span class="viz-field" id="analysisBoardChartTypesLabel">Chart types</span>
+                  <details id="analysisBoardChartTypesDropdown" class="analysis-board-multi-select" aria-labelledby="analysisBoardChartTypesLabel">
+                    <summary id="analysisBoardChartTypeSummary">Timeline, Scatter, Histogram, Percentile</summary>
+                    <div id="analysisBoardChartTypeOptions" class="analysis-board-multi-menu" role="group" aria-label="Analysis board chart types"></div>
+                  </details>
                 </div>
-                <div class="viz-field-row">
-                  <label class="viz-field" for="analysisBoardPresetSelect">Preset</label>
-                  <select id="analysisBoardPresetSelect" class="analysis-board-preset-select" aria-label="Analysis board preset">
-                    <option value="performance">Performance overview</option>
-                    <option value="consistency">Frame-time consistency</option>
-                    <option value="renderedDisplayed">Rendered vs displayed</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </div>
-                <fieldset class="analysis-board-choice-fieldset">
-                  <legend>Report cards</legend>
-                  <div id="analysisBoardCardChoices" class="analysis-board-card-choices"></div>
-                </fieldset>
-                <div id="analysisBoardThresholdWrap" class="viz-field-row hidden">
-                  <label class="viz-field" for="analysisBoardSpikeThreshold">Spike threshold (ms)</label>
-                  <input id="analysisBoardSpikeThreshold" type="number" min="0.01" max="1000" step="0.01" value="16.67" inputmode="decimal" />
-                </div>
-                <p class="analysis-board-setup-copy">Choose up to six cards here, then build the finished report. Results contains no editing controls.</p>
-              </section>
+                <p id="analysisBoardCombinationCount" class="analysis-board-setup-copy" aria-live="polite">4 cards selected</p>
+              </div>
               <div class="viz-actions">
                 <button id="addToChartBtn" class="accent-button" type="button">Add to chart</button>
                 <button id="clearChartBtn" class="secondary-button" disabled type="button">Clear chart</button>
@@ -302,7 +291,7 @@
             <div class="analysis-board-head">
               <div>
                 <p class="workspace-kicker">Analysis board</p>
-                <h2 id="analysisBoardHeading">Performance overview</h2>
+                <h2 id="analysisBoardHeading">Frame Timing Analysis</h2>
                 <p id="analysisBoardExportMeta" class="analysis-board-export-meta">Rendered frame-time and FPS overview</p>
               </div>
               <p id="analysisBoardStatus" class="chart-status-line" aria-live="polite"></p>

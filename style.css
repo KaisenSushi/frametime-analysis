@@ -4046,6 +4046,107 @@ dialog[aria-labelledby="duplicate-dataset-dialog-title"] > div {
   color: var(--v2-muted);
 }
 
+/* Compact board setup: same field rhythm as the single-chart builder. */
+#appShellV2 .analysis-board-multi-controls {
+  min-width: 0;
+}
+
+#appShellV2 .analysis-board-multi-select {
+  position: relative;
+  width: 100%;
+}
+
+#appShellV2 .analysis-board-multi-select > summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 34px 7px 10px;
+  overflow: hidden;
+  border: 1px solid var(--control-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--control-bg);
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+
+#appShellV2 .analysis-board-multi-select > summary::-webkit-details-marker {
+  display: none;
+}
+
+#appShellV2 .analysis-board-multi-select > summary::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+#appShellV2 .analysis-board-multi-select[open] > summary {
+  border-color: var(--v2-accent-muted);
+}
+
+#appShellV2 .analysis-board-multi-select[open] > summary::after {
+  transform: translateY(2px) rotate(225deg);
+}
+
+#appShellV2 .analysis-board-multi-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  left: 0;
+  width: 100%;
+  max-height: 220px;
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface, var(--control-bg));
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.28);
+}
+
+#appShellV2 .analysis-board-multi-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 7px 8px;
+  border-radius: calc(var(--v2-radius-sm) - 2px);
+  color: var(--v2-text);
+  cursor: pointer;
+}
+
+#appShellV2 .analysis-board-multi-option:hover,
+#appShellV2 .analysis-board-multi-option:has(input:checked) {
+  background: var(--v2-accent-soft, var(--v2-field));
+  color: var(--v2-ink);
+}
+
+#appShellV2 .analysis-board-multi-option input {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--v2-accent);
+}
+
+#appShellV2 .analysis-board-multi-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#appShellV2 .analysis-board-multi-controls .analysis-board-setup-copy {
+  margin-top: 7px;
+  font-size: 11px;
+}
+
 #appShellV2 .analysis-board {
   width: 100%;
   min-width: 0;

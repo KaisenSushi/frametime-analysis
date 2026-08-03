@@ -1075,16 +1075,16 @@ let visualizationResultMode = 'single';
 let analysisBoardCharts = [];
 let analysisBoardDatasetIndices = [];
 let analysisBoardConfig = null;
+let analysisBoardSelections = null;
 let analysisBoardRebuildTimer = null;
-let analysisBoardThresholdTimer = null;
 let analysisBoardCardCounter = 0;
 window.analysisBoardReady = false;
 
-const ANALYSIS_BOARD_STORAGE_KEY = 'fta-analysis-board-config-v2';
+const ANALYSIS_BOARD_STORAGE_KEY = 'fta-analysis-board-config-v3';
 const ANALYSIS_BOARD_MAX_CARDS = 6;
 const ANALYSIS_BOARD_CARD_TYPES = Object.freeze({
   timeline: { label: 'Timeline', description: 'Sampled values over the capture.' },
-  scatter: { label: 'Frame-time scatter', description: 'Individual sampled frames make stutters and spike locations easy to see.' },
+  scatter: { label: 'Scatter', description: 'Individual sampled values make spikes and outliers easy to see.' },
   percentile: { label: 'Percentile curve', description: 'Full distribution from the lowest to highest values.' },
   histogram: { label: 'Histogram', description: 'Share of valid samples in shared value ranges.' },
   boxplot: { label: 'Box plot', description: 'Median, spread, whiskers, and outliers.' },
@@ -1097,22 +1097,10 @@ const ANALYSIS_BOARD_FALLBACK_METRICS = [
   'MsBetweenPresents', 'MsBetweenDisplayChange', 'MsGPUBusy', 'MsUntilDisplayed'
 ];
 
-const ANALYSIS_BOARD_SETUP_OPTIONS = Object.freeze([
-  { key: 'frametime-timeline', label: 'Frame-time timeline', type: 'timeline', metric: 'FrameTime' },
-  { key: 'fps-timeline', label: 'Rendered FPS timeline', type: 'timeline', metric: 'RenderedFPS' },
-  { key: 'displayed-fps-timeline', label: 'Displayed FPS timeline', type: 'timeline', metric: 'DisplayedFPS' },
-  { key: 'frametime-scatter', label: 'Frame-time scatter', type: 'scatter', metric: 'FrameTime' },
-  { key: 'fps-scatter', label: 'Rendered FPS scatter', type: 'scatter', metric: 'RenderedFPS' },
-  { key: 'frametime-histogram', label: 'Frame-time histogram', type: 'histogram', metric: 'FrameTime' },
-  { key: 'fps-percentile', label: 'Rendered FPS percentile curve', type: 'percentile', metric: 'RenderedFPS' },
-  { key: 'displayed-fps-percentile', label: 'Displayed FPS percentile curve', type: 'percentile', metric: 'DisplayedFPS' },
-  { key: 'frametime-percentile', label: 'Frame-time percentile curve', type: 'percentile', metric: 'FrameTime' },
-  { key: 'fps-boxplot', label: 'Rendered FPS box plot', type: 'boxplot', metric: 'RenderedFPS' },
-  { key: 'displayed-fps-boxplot', label: 'Displayed FPS box plot', type: 'boxplot', metric: 'DisplayedFPS' },
-  { key: 'frametime-boxplot', label: 'Frame-time box plot', type: 'boxplot', metric: 'FrameTime' },
-  { key: 'fps-summary', label: 'Rendered FPS summary', type: 'summary', metric: 'RenderedFPS' },
-  { key: 'advanced-frametime', label: 'Advanced frame-time metrics', type: 'advanced', metric: 'FrameTime' }
-]);
+const ANALYSIS_BOARD_DEFAULT_SELECTIONS = Object.freeze({
+  metrics: ['FrameTime'],
+  chartTypes: ['timeline', 'scatter', 'histogram', 'percentile']
+});
 
 const ANALYSIS_BOARD_EXCLUDED_METRICS = new Set([
   'Stepwise_Relative_SD', 'Coefficient_of_Variation', 'RMSSD',
@@ -1202,24 +1190,52 @@ function detectAnalysisBoardPreset(cards = analysisBoardConfig?.cards) {
   return 'custom';
 }
 
+function normalizeAnalysisBoardSelections(value) {
+  const source = value && typeof value === 'object' ? value : ANALYSIS_BOARD_DEFAULT_SELECTIONS;
+  const metrics = Array.from(new Set((Array.isArray(source.metrics) ? source.metrics : [])
+    .filter(metric => typeof metric === 'string' && metric.trim())
+    .map(metric => metric.trim())));
+  const chartTypes = Array.from(new Set((Array.isArray(source.chartTypes) ? source.chartTypes : [])
+    .filter(type => Object.prototype.hasOwnProperty.call(ANALYSIS_BOARD_CARD_TYPES, type))));
+  return { metrics, chartTypes };
+}
+
+function cardsFromAnalysisBoardSelections(selections) {
+  const cards = [];
+  selections.metrics.forEach(metric => {
+    selections.chartTypes.forEach(type => {
+      if (cards.length >= ANALYSIS_BOARD_MAX_CARDS) return;
+      cards.push({
+        id: `selected-${type}-${metric}`.replace(/[^a-zA-Z0-9_-]/g, '-'),
+        type,
+        metric,
+        thresholdMs: 16.67
+      });
+    });
+  });
+  return cards;
+}
+
 function loadAnalysisBoardConfig() {
   try {
     const parsed = JSON.parse(localStorage.getItem(ANALYSIS_BOARD_STORAGE_KEY) || 'null');
-    if (parsed && Array.isArray(parsed.cards)) {
-      return { cards: normalizeBoardCards(parsed.cards) };
+    if (parsed && parsed.selections) {
+      analysisBoardSelections = normalizeAnalysisBoardSelections(parsed.selections);
+      return { cards: cardsFromAnalysisBoardSelections(analysisBoardSelections) };
     }
   } catch (error) {
     console.warn('Could not restore analysis-board configuration:', error);
   }
-  return { cards: cloneBoardCards(ANALYSIS_BOARD_PRESETS.performance) };
+  analysisBoardSelections = normalizeAnalysisBoardSelections(ANALYSIS_BOARD_DEFAULT_SELECTIONS);
+  return { cards: cardsFromAnalysisBoardSelections(analysisBoardSelections) };
 }
 
 function saveAnalysisBoardConfig() {
   if (!analysisBoardConfig) return;
   try {
     localStorage.setItem(ANALYSIS_BOARD_STORAGE_KEY, JSON.stringify({
-      version: 2,
-      cards: analysisBoardConfig.cards.map(({ id, type, metric, thresholdMs }) => ({ id, type, metric, thresholdMs }))
+      version: 3,
+      selections: normalizeAnalysisBoardSelections(analysisBoardSelections)
     }));
   } catch (error) {
     console.warn('Could not save analysis-board configuration:', error);
@@ -1244,54 +1260,66 @@ function getBoardMetricChoices() {
   document.querySelectorAll('#metricSelect option').forEach(option => {
     add(option.value, option.textContent?.trim());
   });
-  ANALYSIS_BOARD_FALLBACK_METRICS.forEach(metric => add(metric));
+  if (!options.length) ['FrameTime', 'RenderedFPS'].forEach(metric => add(metric));
   ensureAnalysisBoardConfig().cards.forEach(card => add(card.metric));
   return options;
 }
 
 function renderAnalysisBoardSetupChoices() {
-  const container = document.getElementById('analysisBoardCardChoices');
-  if (!container || container.childElementCount) return;
-  ANALYSIS_BOARD_SETUP_OPTIONS.forEach(option => {
+  const metricContainer = document.getElementById('analysisBoardMetricOptions');
+  const typeContainer = document.getElementById('analysisBoardChartTypeOptions');
+  if (!metricContainer || !typeContainer) return;
+  const selections = analysisBoardSelections || normalizeAnalysisBoardSelections(ANALYSIS_BOARD_DEFAULT_SELECTIONS);
+  const appendChoice = (container, group, value, labelText, checked) => {
     const label = document.createElement('label');
-    label.className = 'analysis-board-choice';
-    label.htmlFor = `analysisBoardChoice-${option.key}`;
+    label.className = 'analysis-board-multi-option';
+    label.htmlFor = `analysisBoard-${group}-${value}`.replace(/[^a-zA-Z0-9_-]/g, '-');
     const input = document.createElement('input');
     input.type = 'checkbox';
-    input.id = `analysisBoardChoice-${option.key}`;
-    input.dataset.boardOption = option.key;
+    input.id = label.htmlFor;
+    input.dataset.boardGroup = group;
+    input.value = value;
+    input.checked = checked;
     const text = document.createElement('span');
-    text.textContent = option.label;
+    text.textContent = labelText;
     label.append(input, text);
     container.appendChild(label);
+  };
+
+  metricContainer.innerHTML = '';
+  getBoardMetricChoices().forEach(choice => {
+    appendChoice(metricContainer, 'metric', choice.value, choice.label, selections.metrics.includes(choice.value));
+  });
+  typeContainer.innerHTML = '';
+  Object.entries(ANALYSIS_BOARD_CARD_TYPES).forEach(([value, definition]) => {
+    appendChoice(typeContainer, 'chartType', value, definition.label, selections.chartTypes.includes(value));
   });
 }
 
 function updateAnalysisBoardPresetControl() {
   renderAnalysisBoardSetupChoices();
-  const config = ensureAnalysisBoardConfig();
-  const presetSelect = document.getElementById('analysisBoardPresetSelect');
-  if (presetSelect) presetSelect.value = detectAnalysisBoardPreset();
-
-  const selectedPairs = new Set(config.cards.map(card => `${card.type}\u0000${card.metric}`));
-  const choiceInputs = Array.from(document.querySelectorAll('#analysisBoardCardChoices input[data-board-option]'));
-  choiceInputs.forEach(input => {
-    const option = ANALYSIS_BOARD_SETUP_OPTIONS.find(item => item.key === input.dataset.boardOption);
-    input.checked = Boolean(option && selectedPairs.has(`${option.type}\u0000${option.metric}`));
-  });
-  const selectedCount = choiceInputs.filter(input => input.checked).length;
-  choiceInputs.forEach(input => {
-    input.disabled = !input.checked && selectedCount >= ANALYSIS_BOARD_MAX_CARDS;
-  });
-
-  const count = document.getElementById('analysisBoardCardCount');
-  if (count) count.textContent = `${selectedCount}/${ANALYSIS_BOARD_MAX_CARDS} selected`;
-  const advancedCard = config.cards.find(card => card.type === 'advanced' && card.metric === 'FrameTime');
-  const thresholdWrap = document.getElementById('analysisBoardThresholdWrap');
-  thresholdWrap?.classList.toggle('hidden', !advancedCard);
-  const thresholdInput = document.getElementById('analysisBoardSpikeThreshold');
-  if (thresholdInput && advancedCard && document.activeElement !== thresholdInput) {
-    thresholdInput.value = String(advancedCard.thresholdMs || 16.67);
+  const selections = analysisBoardSelections || normalizeAnalysisBoardSelections(ANALYSIS_BOARD_DEFAULT_SELECTIONS);
+  const metricChoices = getBoardMetricChoices();
+  const selectedMetricLabels = metricChoices
+    .filter(choice => selections.metrics.includes(choice.value))
+    .map(choice => choice.label);
+  const selectedTypeLabels = Object.entries(ANALYSIS_BOARD_CARD_TYPES)
+    .filter(([value]) => selections.chartTypes.includes(value))
+    .map(([, definition]) => definition.label);
+  const summarize = (labels, emptyText) => {
+    if (!labels.length) return emptyText;
+    return labels.join(', ');
+  };
+  const metricSummary = document.getElementById('analysisBoardMetricSummary');
+  const typeSummary = document.getElementById('analysisBoardChartTypeSummary');
+  if (metricSummary) metricSummary.textContent = summarize(selectedMetricLabels, 'Select metrics');
+  if (typeSummary) typeSummary.textContent = summarize(selectedTypeLabels, 'Select chart types');
+  const combinationCount = selections.metrics.length * selections.chartTypes.length;
+  const count = document.getElementById('analysisBoardCombinationCount');
+  if (count) {
+    count.textContent = combinationCount
+      ? `${combinationCount} card${combinationCount === 1 ? '' : 's'} selected`
+      : 'Select at least one metric and one chart type.';
   }
 }
 
@@ -1921,104 +1949,30 @@ function refreshDatasetDisplayNames() {
   }
 }
 
-function applyAnalysisBoardPreset(name) {
-  const preset = ANALYSIS_BOARD_PRESETS[name];
-  if (!preset) return;
-  analysisBoardConfig = { cards: cloneBoardCards(preset) };
-  saveAnalysisBoardConfig();
-
-  const title = ANALYSIS_BOARD_PRESET_TITLES[name];
-  const titleInput = document.getElementById('analysisBoardTitleInput');
-  const heading = document.getElementById('analysisBoardHeading');
-  if (title) {
-    if (titleInput) titleInput.value = title;
-    if (heading) heading.textContent = title;
-    try { localStorage.setItem('fta-analysis-board-title', title); } catch (error) { /* storage unavailable */ }
-  }
-
-  updateAnalysisBoardPresetControl();
-  if (window.analysisBoardReady) {
-    destroyAnalysisBoard();
-    syncVisualizationResultUi('board');
-  }
-}
-
-function addAnalysisBoardCard() {
-  const config = ensureAnalysisBoardConfig();
-  if (config.cards.length >= ANALYSIS_BOARD_MAX_CARDS) {
-    window.notify?.(`The analysis board supports up to ${ANALYSIS_BOARD_MAX_CARDS} cards.`, 'warning');
-    return;
-  }
-  const last = config.cards[config.cards.length - 1];
-  config.cards.push({
-    id: createBoardCardId(),
-    type: last?.type || 'timeline',
-    metric: last?.metric || 'RenderedFPS'
-  });
-  saveAnalysisBoardConfig();
-  updateAnalysisBoardPresetControl();
-  if (window.analysisBoardReady) scheduleAnalysisBoardRebuild();
-}
-
-function updateAnalysisBoardCard(cardId, patch) {
-  const card = ensureAnalysisBoardConfig().cards.find(item => item.id === cardId);
-  if (!card) return;
-  Object.assign(card, patch);
-  saveAnalysisBoardConfig();
-  updateAnalysisBoardPresetControl();
-  scheduleAnalysisBoardRebuild();
-}
-
-function moveAnalysisBoardCard(cardId, direction) {
-  const cards = ensureAnalysisBoardConfig().cards;
-  const index = cards.findIndex(card => card.id === cardId);
-  const nextIndex = index + direction;
-  if (index < 0 || nextIndex < 0 || nextIndex >= cards.length) return;
-  [cards[index], cards[nextIndex]] = [cards[nextIndex], cards[index]];
-  saveAnalysisBoardConfig();
-  updateAnalysisBoardPresetControl();
-  scheduleAnalysisBoardRebuild();
-}
-
-function removeAnalysisBoardCard(cardId) {
-  const config = ensureAnalysisBoardConfig();
-  if (config.cards.length <= 1) return;
-  config.cards = config.cards.filter(card => card.id !== cardId);
-  saveAnalysisBoardConfig();
-  updateAnalysisBoardPresetControl();
-  scheduleAnalysisBoardRebuild();
-}
-
 function setupAnalysisBoardCustomization() {
   ensureAnalysisBoardConfig();
-  const presetSelect = document.getElementById('analysisBoardPresetSelect');
-  const choices = document.getElementById('analysisBoardCardChoices');
-  const thresholdInput = document.getElementById('analysisBoardSpikeThreshold');
+  const controls = document.getElementById('analysisBoardSetupHint');
+  const metricDropdown = document.getElementById('analysisBoardMetricsDropdown');
+  const chartTypeDropdown = document.getElementById('analysisBoardChartTypesDropdown');
 
-  presetSelect?.addEventListener('change', () => {
-    if (presetSelect.value === 'custom') return;
-    applyAnalysisBoardPreset(presetSelect.value);
-  });
-
-  choices?.addEventListener('change', event => {
+  controls?.addEventListener('change', event => {
     const target = event.target;
-    if (!(target instanceof HTMLInputElement) || !target.matches('input[data-board-option]')) return;
-    const previousThreshold = ensureAnalysisBoardConfig().cards.find(card => card.type === 'advanced')?.thresholdMs || 16.67;
-    const checked = new Set(Array.from(
-      choices.querySelectorAll('input[data-board-option]:checked'),
-      input => input.dataset.boardOption
-    ));
-    analysisBoardConfig = {
-      cards: ANALYSIS_BOARD_SETUP_OPTIONS
-        .filter(option => checked.has(option.key))
-        .slice(0, ANALYSIS_BOARD_MAX_CARDS)
-        .map(option => ({
-          id: `setup-${option.key}`,
-          type: option.type,
-          metric: option.metric,
-          thresholdMs: option.type === 'advanced' ? previousThreshold : 16.67
-        }))
-    };
+    if (!(target instanceof HTMLInputElement) || !target.dataset.boardGroup) return;
+    const metrics = Array.from(
+      controls.querySelectorAll('input[data-board-group="metric"]:checked'),
+      input => input.value
+    );
+    const chartTypes = Array.from(
+      controls.querySelectorAll('input[data-board-group="chartType"]:checked'),
+      input => input.value
+    );
+    if (metrics.length * chartTypes.length > ANALYSIS_BOARD_MAX_CARDS) {
+      target.checked = false;
+      window.notify?.(`Choose combinations that create no more than ${ANALYSIS_BOARD_MAX_CARDS} cards.`, 'warning');
+      return;
+    }
+    analysisBoardSelections = normalizeAnalysisBoardSelections({ metrics, chartTypes });
+    analysisBoardConfig = { cards: cardsFromAnalysisBoardSelections(analysisBoardSelections) };
     saveAnalysisBoardConfig();
     updateAnalysisBoardPresetControl();
     if (window.analysisBoardReady) {
@@ -2027,22 +1981,21 @@ function setupAnalysisBoardCustomization() {
     }
   });
 
-  thresholdInput?.addEventListener('input', () => {
-    const numeric = Number(thresholdInput.value);
-    if (!Number.isFinite(numeric) || numeric <= 0) return;
-    const card = ensureAnalysisBoardConfig().cards.find(item => item.type === 'advanced' && item.metric === 'FrameTime');
-    if (!card) return;
-    card.thresholdMs = Math.min(1000, Math.max(0.01, numeric));
-    saveAnalysisBoardConfig();
-    const preset = document.getElementById('analysisBoardPresetSelect');
-    if (preset) preset.value = detectAnalysisBoardPreset();
-    if (window.analysisBoardReady) {
-      destroyAnalysisBoard();
-      syncVisualizationResultUi('board');
+  metricDropdown?.addEventListener('toggle', () => {
+    if (metricDropdown.open && chartTypeDropdown) chartTypeDropdown.open = false;
+  });
+  chartTypeDropdown?.addEventListener('toggle', () => {
+    if (chartTypeDropdown.open && metricDropdown) metricDropdown.open = false;
+  });
+  document.addEventListener('click', event => {
+    if (!controls?.contains(event.target)) {
+      if (metricDropdown) metricDropdown.open = false;
+      if (chartTypeDropdown) chartTypeDropdown.open = false;
     }
   });
 
   document.addEventListener('datasetsUpdated', () => {
+    updateAnalysisBoardPresetControl();
     if (window.analysisBoardReady && analysisBoardDatasetIndices.length) {
       scheduleAnalysisBoardRebuild();
     }
